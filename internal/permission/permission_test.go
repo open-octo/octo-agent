@@ -1018,11 +1018,18 @@ func TestResolveUnattendedDefaultMode_UnsetFallsBackToAuto(t *testing.T) {
 	}
 }
 
-func TestResolveUnattendedDefaultMode_ExplicitConfigHonored(t *testing.T) {
-	for _, mode := range []Mode{ModeInteractive, ModeStrict, ModeAutoApprove} {
-		writeGlobalPermissionMode(t, string(mode))
-		if got := ResolveUnattendedDefaultMode(); got != mode {
-			t.Errorf("explicit %s should be honored, got %s", mode, got)
+func TestResolveUnattendedDefaultMode_ExplicitConfig(t *testing.T) {
+	cases := map[Mode]Mode{
+		ModeStrict:      ModeStrict,
+		ModeAutoApprove: ModeAutoApprove,
+		// Nobody can answer an ask on a cron tick and the ask never times
+		// out, so interactive would hang the turn forever (#2613).
+		ModeInteractive: ModeAutoApprove,
+	}
+	for configured, want := range cases {
+		writeGlobalPermissionMode(t, string(configured))
+		if got := ResolveUnattendedDefaultMode(); got != want {
+			t.Errorf("explicit %s: got %s, want %s", configured, got, want)
 		}
 	}
 }

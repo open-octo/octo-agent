@@ -52,7 +52,7 @@ func TestCreateTask_PersistsDirectory(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	createTaskForTest(t, srv, `{"name":"dirtask","cron":"0 0 9 * * *","prompt":"go","directory":"/srv/repo"}`)
+	createTaskForTest(t, srv, `{"name":"dirtask","cron":"0 0 9 * * *","prompt":"go","directory":"/srv/repo","permission_mode":"auto"}`)
 
 	tasks := listTasksForTest(t, srv)
 	if len(tasks) != 1 {
@@ -71,7 +71,7 @@ func TestPatchTask_UpdatesFields(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"edit-me","cron":"0 0 9 * * *","prompt":"old"}`)
+	id := createTaskForTest(t, srv, `{"name":"edit-me","cron":"0 0 9 * * *","prompt":"old","permission_mode":"auto"}`)
 
 	patch := `{"prompt":"new prompt","directory":"/w","enabled":false,"agent_id":"code-review"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(patch))
@@ -134,7 +134,7 @@ func TestCreateTask_CreatesSessionGroup(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"daily-report","cron":"0 0 9 * * *","prompt":"go"}`)
+	id := createTaskForTest(t, srv, `{"name":"daily-report","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`)
 
 	tasks := listTasksForTest(t, srv)
 	var task *taskResponse
@@ -166,7 +166,7 @@ func TestPatchTask_RenamesSessionGroup(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"old-name","cron":"0 0 9 * * *","prompt":"go"}`)
+	id := createTaskForTest(t, srv, `{"name":"old-name","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`)
 	groupID := listTasksForTest(t, srv)[0].SessionGroupID
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(`{"name":"new-name"}`))
@@ -194,7 +194,7 @@ func TestPatchTask_RejectsEmptyName(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"keep","cron":"0 0 9 * * *","prompt":"go"}`)
+	id := createTaskForTest(t, srv, `{"name":"keep","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`)
 
 	for _, body := range []string{`{"name":""}`, `{"name":"   "}`} {
 		req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(body))
@@ -211,6 +211,58 @@ func TestPatchTask_RejectsEmptyName(t *testing.T) {
 	}
 }
 
+// TestTaskPermissionMode_CreatePatchValidate: permission_mode is required on
+// create, round-trips on create and PATCH, and only auto/strict are accepted —
+// a run has nobody to answer an ask (#2613).
+func TestTaskPermissionMode_CreatePatchValidate(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	post := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/tasks", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		return w.Code
+	}
+	for _, body := range []string{
+		`{"name":"m","cron":"0 0 9 * * *","prompt":"go"}`,
+		`{"name":"i","cron":"0 0 9 * * *","prompt":"go","permission_mode":"interactive"}`,
+	} {
+		if code := post(body); code != http.StatusBadRequest {
+			t.Errorf("create %s: status = %d, want 400", body, code)
+		}
+	}
+
+	id := createTaskForTest(t, srv, `{"name":"s","cron":"0 0 9 * * *","prompt":"go","permission_mode":"strict"}`)
+	if got := listTasksForTest(t, srv)[0].PermissionMode; got != "strict" {
+		t.Fatalf("created permission_mode = %q, want strict", got)
+	}
+
+	patch := func(body string) (int, taskResponse) {
+		req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		var got taskResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &got)
+		return w.Code, got
+	}
+	for _, body := range []string{`{"permission_mode":"interactive"}`, `{"permission_mode":""}`} {
+		if code, _ := patch(body); code != http.StatusBadRequest {
+			t.Errorf("patch %s: status = %d, want 400", body, code)
+		}
+	}
+	if got := listTasksForTest(t, srv)[0].PermissionMode; got != "strict" {
+		t.Errorf("after rejected patch permission_mode = %q, want strict unchanged", got)
+	}
+	if code, got := patch(`{"permission_mode":"auto"}`); code != http.StatusOK || got.PermissionMode != "auto" {
+		t.Errorf("patch to auto: status %d, permission_mode %q", code, got.PermissionMode)
+	}
+}
+
 // TestPatchTask_RejectsUnknownField: a field the task doesn't have must be a
 // 400 naming it, not a 200 that silently drops it (#2613).
 func TestPatchTask_RejectsUnknownField(t *testing.T) {
@@ -219,9 +271,9 @@ func TestPatchTask_RejectsUnknownField(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"keep","cron":"0 0 9 * * *","prompt":"go"}`)
+	id := createTaskForTest(t, srv, `{"name":"keep","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`)
 
-	body := `{"prompt":"changed","permission_mode":"auto"}`
+	body := `{"prompt":"changed","bogus_field":"x"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -229,7 +281,7 @@ func TestPatchTask_RejectsUnknownField(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("patch status = %d, want 400: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "permission_mode") {
+	if !strings.Contains(w.Body.String(), "bogus_field") {
 		t.Errorf("error should name the unknown field, got %s", w.Body.String())
 	}
 	// The known field in the same body is not half-applied.
@@ -246,7 +298,7 @@ func TestCreateTask_RejectsUnknownField(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	body := `{"name":"t","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`
+	body := `{"name":"t","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto","bogus_field":"x"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -254,7 +306,7 @@ func TestCreateTask_RejectsUnknownField(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("create status = %d, want 400: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "permission_mode") {
+	if !strings.Contains(w.Body.String(), "bogus_field") {
 		t.Errorf("error should name the unknown field, got %s", w.Body.String())
 	}
 	if got := listTasksForTest(t, srv); len(got) != 0 {
@@ -270,8 +322,8 @@ func TestCreateTask_Enabled(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	createTaskForTest(t, srv, `{"name":"on","cron":"0 0 9 * * *","prompt":"go"}`)
-	createTaskForTest(t, srv, `{"name":"off","cron":"0 0 9 * * *","prompt":"go","enabled":false}`)
+	createTaskForTest(t, srv, `{"name":"on","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`)
+	createTaskForTest(t, srv, `{"name":"off","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto","enabled":false}`)
 
 	for _, task := range listTasksForTest(t, srv) {
 		want := task.Name == "on"
@@ -289,7 +341,7 @@ func TestDeleteTask_DeletesGroupKeepsSessions(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"doomed","cron":"0 0 9 * * *","prompt":"go"}`)
+	id := createTaskForTest(t, srv, `{"name":"doomed","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`)
 	groupID := listTasksForTest(t, srv)[0].SessionGroupID
 
 	// Put a real session in the group so we can prove it survives.
@@ -351,7 +403,7 @@ func TestCreateTask_RejectsInvalidAgentID(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	body := `{"name":"bad","cron":"0 0 9 * * *","prompt":"go","agent_id":"nonexistent"}`
+	body := `{"name":"bad","cron":"0 0 9 * * *","prompt":"go","agent_id":"nonexistent","permission_mode":"auto"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/tasks", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -369,7 +421,7 @@ func TestCreateTask_AcceptsValidAgentID(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"ok","cron":"0 0 9 * * *","prompt":"go","agent_id":"code-review"}`)
+	id := createTaskForTest(t, srv, `{"name":"ok","cron":"0 0 9 * * *","prompt":"go","agent_id":"code-review","permission_mode":"auto"}`)
 	tasks := listTasksForTest(t, srv)
 	if len(tasks) != 1 {
 		t.Fatalf("want 1 task, got %d", len(tasks))
@@ -388,7 +440,7 @@ func TestTransferTask_RejectsInvalidAgentID(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"t","cron":"0 0 9 * * *","prompt":"go"}`)
+	id := createTaskForTest(t, srv, `{"name":"t","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`)
 
 	body := `{"agent_id":"nonexistent"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/tasks/"+id+"/transfer", strings.NewReader(body))
@@ -408,7 +460,7 @@ func TestPatchTask_RejectsInvalidAgentID(t *testing.T) {
 	t.Setenv("USERPROFILE", tmp)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
 
-	id := createTaskForTest(t, srv, `{"name":"p","cron":"0 0 9 * * *","prompt":"go"}`)
+	id := createTaskForTest(t, srv, `{"name":"p","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`)
 
 	body := `{"agent_id":"nonexistent"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(body))

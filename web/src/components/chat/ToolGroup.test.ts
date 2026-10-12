@@ -172,3 +172,46 @@ describe('terminal command copy button', () => {
     expect(get(toasts)[0].type).toBe('error')
   })
 })
+
+// The header count is derived from the result text, so a zero-hit grep's
+// "(no matches)" sentinel used to read as "1 matches" (#2612).
+describe('tool header count', () => {
+  const meta = (over: Record<string, unknown>) =>
+    render([tool(over)]).querySelector('.tool-submeta')?.textContent
+
+  it('shows 0 matches for a grep with no hits', () => {
+    expect(meta({ name: 'grep', args: { pattern: 'x' }, result: '(no matches)' })).toBe('0 matches')
+  })
+
+  it('uses the singular for one', () => {
+    expect(meta({ name: 'grep', args: { pattern: 'x' }, result: 'a.go:1:x' })).toBe('1 match')
+  })
+
+  // The cap marker isn't a match, and the real total is in it.
+  it('reports the full total for a truncated grep', () => {
+    const res = 'a.go:1:x\nb.go:2:x\n\n[truncated to first 2 of 812 lines — narrow the pattern]'
+    expect(meta({ name: 'grep', args: { pattern: 'x' }, result: res })).toBe('812 matches')
+  })
+
+  it('counts files in files_with_matches mode', () => {
+    expect(meta({ name: 'grep', args: { pattern: 'x', mode: 'files_with_matches' }, result: 'a.go\nb.go' })).toBe('2 files')
+  })
+
+  it('sums the per-file tallies in count mode', () => {
+    expect(meta({ name: 'grep', args: { pattern: 'x', mode: 'count' }, result: 'a.go:3\nb.go:1' })).toBe('4 matches')
+  })
+
+  // A single-file count search prints the bare number, no path.
+  it('reads a bare tally in count mode', () => {
+    expect(meta({ name: 'grep', args: { pattern: 'x', mode: 'count', path: 'a.go' }, result: '3' })).toBe('3 matches')
+  })
+
+  it('reports lines, not matches, when context is on', () => {
+    const res = 'a.go:1:x\na.go-2-y\n--\nb.go-1-z\nb.go:2:x'
+    expect(meta({ name: 'grep', args: JSON.stringify({ pattern: 'x', context_lines: 1 }), result: res })).toBe('4 lines')
+  })
+
+  it('keeps the plural for many', () => {
+    expect(meta({ name: 'read_file', args: { path: '/tmp/a' }, result: 'a\nb' })).toBe('2 lines')
+  })
+})

@@ -10,6 +10,9 @@ export interface TaskResponse {
   agent: string
   agent_id?: string
   notify: string
+  // How a run resolves a tool call that would need approval: 'auto' allows,
+  // 'strict' denies. Absent on servers that predate the field.
+  permission_mode?: 'auto' | 'strict'
   enabled: boolean
   created_at: string
   last_run: string

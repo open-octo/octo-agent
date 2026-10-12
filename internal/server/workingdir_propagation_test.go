@@ -1,25 +1,23 @@
 package server
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
-// TestPrepareToolTurn_CronSessionSelfHealsFromStaleInteractiveMode guards
-// pre-existing cron task sessions, not just newly created ones: before
-// write_file/edit_file stopped blanket-allowing $CWD, CreateSession
-// persisted whatever the global default resolved to (often "interactive")
-// onto every task session it created, and it only ever sets PermissionMode
-// when creating a session, never when reusing one — so an old task's
-// session file keeps saying "interactive" forever unless something at
-// resolution time corrects it. Without the self-heal, this tick's
-// write_file calls would hit a real ask with nobody to answer it (cron has
-// no WS client), timing out to deny and silently breaking the task.
-func TestPrepareToolTurn_CronSessionSelfHealsFromStaleInteractiveMode(t *testing.T) {
+// A cron run's mode is decided once, by newSession — prepareToolTurn must not
+// second-guess a cron session's own mode. The case this pins: a person
+// continues a run's session in the Web UI and switches it to interactive;
+// asks must then reach them rather than being silently auto-approved.
+func TestPrepareToolTurn_CronSessionHonorsInteractive(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS() // the ask goes out over the WS hub
+	srv.pendingConfirms = map[string]wsEventRequestConfirmation{}
 
 	dir := t.TempDir()
 	a := agent.New(&stubSender{}, "qwen3.7-max")
@@ -27,23 +25,25 @@ func TestPrepareToolTurn_CronSessionSelfHealsFromStaleInteractiveMode(t *testing
 
 	sess := agent.NewSession(a.Model, "")
 	sess.Source = "cron"
-	sess.PermissionMode = "interactive" // stale value from before this fix
+	sess.PermissionMode = "interactive"
 
-	ctx, _, _, cleanup, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "cron-self-heal"), a, sess)
+	ctx, _, _, cleanup, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "cron-interactive"), a, sess)
 	if err != nil {
 		t.Fatalf("prepareToolTurn: %v", err)
 	}
 	defer cleanup()
 
-	allowed, reason := a.Gate.Check(ctx, "write_file", map[string]any{"path": dir + "/out.txt"})
-	if !allowed {
-		t.Errorf("write_file under a stale-interactive cron session: got denied (%q), want allowed (self-heal to auto)", reason)
+	// Nobody answers the ask, so it ends with the context: denied, not
+	// auto-approved.
+	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	allowed, _ := a.Gate.Check(ctx, "write_file", map[string]any{"path": dir + "/out.txt"})
+	if allowed {
+		t.Errorf("write_file under an interactive cron session: got allowed, want an unanswered ask")
 	}
 }
 
-// An explicit strict/auto choice on a cron session must still be honored —
-// the self-heal only ever corrects "interactive", which was never
-// functional for an unattended tick in the first place.
+// An explicit strict on a cron session is honored the same way.
 func TestPrepareToolTurn_CronSessionHonorsExplicitStrictMode(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})

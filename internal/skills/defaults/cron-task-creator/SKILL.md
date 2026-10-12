@@ -26,6 +26,7 @@ a run).
 | `agent_id` | no | Id of the expert (`/api/agents`) the run executes as; empty = the Default Agent |
 | `directory` | no | Working directory the run executes in |
 | `notify` | no | IM chats to push each run's final reply (or failure) to — see the notify table |
+| `permission_mode` | yes | `auto` (tool calls that would need approval are allowed) or `strict` (they are denied); deny rules apply either way. `interactive` is rejected — a run has nobody to answer an approval |
 | `enabled` | yes | Whether the schedule is active |
 
 `id`, `created_at`, `last_run`, `session_id`, `session_group_id` are
@@ -67,6 +68,10 @@ day, not for sub-hourly polling. If the user wants faster iteration, use
 
 1. **Gather** the schedule, the prompt, and any optional fields. If the schedule
    is vague ("every morning"), pick a concrete time and confirm.
+   **Always ask for `permission_mode`** — never pick it yourself. Explain it in
+   one line: `auto` lets the run use tools that would normally ask for
+   approval, `strict` refuses them (the run may then fail to finish); deny
+   rules block dangerous commands either way.
 2. **Translate** to a 6-field expression and **echo it back in plain words**
    ("every weekday at 18:30") before creating anything.
 3. **Write a self-contained prompt.** The task session has no access to this
@@ -115,8 +120,9 @@ inline `octo-ui` fence — **no panel `id`** — holding, in this order:
 | `note` | `textarea`, `rows: 3` | empty; label along the lines of "Or describe the change and I'll make it" |
 
 followed by a primary `button` with `action: "save_task"` and
-`payload: {"id": "<id>"}`. Label fields in the user's language. `notify` and
-`agent_id` stay out of the form — changes to them go through `note`.
+`payload: {"id": "<id>"}`. Label fields in the user's language. `notify`,
+`agent_id` and `permission_mode` stay out of the form — changes to them go
+through `note`.
 
 The renderer silently truncates a prefilled value past its cap — **500**
 characters for an `input`, **5000** for a `textarea` — and whatever it shows
@@ -148,7 +154,7 @@ reschedules the running process immediately. If the Environment section has an
 # model, agent_id, notify) right here.
 curl -s -X POST http://127.0.0.1:8088/api/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","directory":"/srv/repo"}'
+  -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","permission_mode":"auto","directory":"/srv/repo"}'
 
 curl -s http://127.0.0.1:8088/api/tasks                      # list
 curl -s -X DELETE http://127.0.0.1:8088/api/tasks/{id}       # delete
@@ -164,7 +170,8 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`,
-`agent_id`, `directory`, `notify` — send only the fields you want to change.
+`agent_id`, `directory`, `notify`, `permission_mode` — send only the fields you
+want to change.
 A changed `cron` is re-validated (syntax and the 1-hour floor) and rejected
 with a 400.
 Renaming via `name` also renames the task's session group. Look up `{id}` from
@@ -184,6 +191,7 @@ Write `~/.octo/tasks/<id>.json` with `write_file` (`id` format
   "cron": "0 0 9 * * *",
   "prompt": "Summarize ...",
   "directory": "/srv/repo",
+  "permission_mode": "auto",
   "enabled": true,
   "created_at": "2026-06-10T09:00:00Z"
 }

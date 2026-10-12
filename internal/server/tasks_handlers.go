@@ -31,6 +31,8 @@ type taskRequest struct {
 	AgentID   string                  `json:"agent_id,omitempty"`
 	Directory string                  `json:"directory,omitempty"`
 	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
+	// PermissionMode is required: "auto" or "strict".
+	PermissionMode string `json:"permission_mode"`
 	// Enabled defaults to true when omitted.
 	Enabled *bool `json:"enabled,omitempty"`
 }
@@ -45,6 +47,7 @@ type taskResponse struct {
 	AgentID        string                  `json:"agent_id,omitempty"`
 	Directory      string                  `json:"directory,omitempty"`
 	Notify         scheduler.NotifyTargets `json:"notify,omitempty"`
+	PermissionMode string                  `json:"permission_mode"`
 	Enabled        bool                    `json:"enabled"`
 	CreatedAt      string                  `json:"created_at,omitempty"`
 	LastRun        string                  `json:"last_run,omitempty"`
@@ -72,8 +75,25 @@ func (s *Server) initScheduler() {
 		slog.Error("scheduler", "err", err)
 		return
 	}
+	backfillTaskPermissionModes(sch)
 	sch.Start()
 	s.scheduler = sch
+}
+
+// backfillTaskPermissionModes gives every task a valid permission_mode. Tasks
+// created before the field existed — or written by hand — get the mode they
+// were effectively running under, the unattended default, persisted so it
+// shows on the task and no longer tracks later global config changes.
+func backfillTaskPermissionModes(sch *scheduler.Scheduler) {
+	mode := string(permission.ResolveUnattendedDefaultMode())
+	for _, t := range sch.List() {
+		if validateTaskPermissionMode(t.PermissionMode) == nil {
+			continue
+		}
+		if err := sch.SetPermissionMode(t.ID, mode); err != nil {
+			slog.Warn("cron: backfill permission_mode", "task", t.Name, "err", err)
+		}
+	}
 }
 
 // createCronProject creates the project a task's runs cluster under. The
@@ -177,7 +197,15 @@ func (s *Server) newSession(task scheduler.Task) (string, error) {
 	sess.AgentID = task.AgentID
 	// Cron ticks have no human to answer an ask prompt, unlike the web/IM
 	// default this mirrors — see ResolveUnattendedDefaultMode's doc comment.
-	_ = sess.SetPermissionMode(string(permission.ResolveUnattendedDefaultMode()))
+	// Every run is a fresh session, so this is the only place a run's mode
+	// is decided. The fallback only covers a task file written by hand while
+	// the server was running; backfillTaskPermissionModes fixes it on the next
+	// load.
+	mode := permission.ResolveUnattendedDefaultMode()
+	if validateTaskPermissionMode(task.PermissionMode) == nil {
+		mode = permission.Mode(task.PermissionMode)
+	}
+	_ = sess.SetPermissionMode(string(mode))
 	// task.Directory only seeds the session's WorkingDir here, once, at
 	// creation. After that, sess.WorkingDir (editable any time via the
 	// web Composer's directory chip, PATCH /api/sessions/{id}/working_dir)
@@ -569,24 +597,29 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeInvalidJSONBody(w, err)
 		return
 	}
-	if req.Name == "" || req.Cron == "" || req.Prompt == "" {
-		writeError(w, http.StatusBadRequest, "name, cron, and prompt are required")
+	if req.Name == "" || req.Cron == "" || req.Prompt == "" || req.PermissionMode == "" {
+		writeError(w, http.StatusBadRequest, "name, cron, prompt, and permission_mode are required")
 		return
 	}
 	if err := s.validateAgentID(req.AgentID); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateTaskPermissionMode(req.PermissionMode); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	task := scheduler.Task{
-		Name:      req.Name,
-		Cron:      req.Cron,
-		Prompt:    req.Prompt,
-		Model:     req.Model,
-		Agent:     req.Agent,
-		AgentID:   req.AgentID,
-		Directory: req.Directory,
-		Notify:    req.Notify,
-		Enabled:   req.Enabled == nil || *req.Enabled,
+		Name:           req.Name,
+		Cron:           req.Cron,
+		Prompt:         req.Prompt,
+		Model:          req.Model,
+		Agent:          req.Agent,
+		AgentID:        req.AgentID,
+		Directory:      req.Directory,
+		Notify:         req.Notify,
+		Enabled:        req.Enabled == nil || *req.Enabled,
+		PermissionMode: req.PermissionMode,
 	}
 	if err := s.scheduler.Add(&task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -701,6 +734,8 @@ type patchTaskRequest struct {
 	Directory *string                  `json:"directory,omitempty"`
 	Notify    *scheduler.NotifyTargets `json:"notify,omitempty"`
 	Name      *string                  `json:"name,omitempty"`
+	// PermissionMode: "auto" or "strict".
+	PermissionMode *string `json:"permission_mode,omitempty"`
 }
 
 // handlePatchTask updates any subset of a scheduled task's fields and reschedules
@@ -719,8 +754,8 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing task id")
 		return
 	}
-	// Strict: a field the task doesn't have (e.g. permission_mode) would
-	// otherwise return 200 and read as applied (#2613).
+	// Strict: a field the task doesn't have would otherwise return 200 and
+	// read as applied (#2613).
 	var req patchTaskRequest
 	if err := readBodyJSONStrict(r, &req); err != nil {
 		writeInvalidJSONBody(w, err)
@@ -764,6 +799,13 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	if req.Notify != nil {
 		task.Notify = *req.Notify
 	}
+	if req.PermissionMode != nil {
+		if err := validateTaskPermissionMode(*req.PermissionMode); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		task.PermissionMode = *req.PermissionMode
+	}
 	if err := s.validateAgentID(task.AgentID); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -783,18 +825,30 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.taskToResponse(*task))
 }
 
+// validateTaskPermissionMode accepts the modes a run can actually use.
+// interactive is rejected: a run has nobody to answer the ask, so the turn
+// would hang (#2613).
+func validateTaskPermissionMode(mode string) error {
+	switch mode {
+	case string(permission.ModeAutoApprove), string(permission.ModeStrict):
+		return nil
+	}
+	return fmt.Errorf("permission_mode must be auto or strict")
+}
+
 func (s *Server) taskToResponse(t scheduler.Task) taskResponse {
 	r := taskResponse{
-		ID:        t.ID,
-		Name:      t.Name,
-		Cron:      t.Cron,
-		Prompt:    t.Prompt,
-		Model:     t.Model,
-		Agent:     t.Agent,
-		AgentID:   t.AgentID,
-		Directory: t.Directory,
-		Notify:    t.Notify,
-		Enabled:   t.Enabled,
+		ID:             t.ID,
+		Name:           t.Name,
+		Cron:           t.Cron,
+		Prompt:         t.Prompt,
+		Model:          t.Model,
+		Agent:          t.Agent,
+		AgentID:        t.AgentID,
+		Directory:      t.Directory,
+		Notify:         t.Notify,
+		Enabled:        t.Enabled,
+		PermissionMode: t.PermissionMode,
 	}
 	// A bare trailing "Z" is a literal in a Go layout, not the UTC designator,
 	// so formatting a local time with it used to claim local wall-clock as UTC

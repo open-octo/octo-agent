@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,8 +70,7 @@ func TestCreateSession_SeedsWorkingDirFromTaskDirectory(t *testing.T) {
 
 // A cron tick has nobody present to answer an ask prompt, so a freshly
 // created task session must not inherit the web/CLI/IM interactive default —
-// write_file/edit_file no longer blanket-allow $CWD, and interactive's
-// implicit ask would time out to deny on every write.
+// an ask waits with no timeout, so the run would hang.
 func TestCreateSession_DefaultsToAutoPermissionModeWhenUnconfigured(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
@@ -108,6 +108,104 @@ func TestCreateSession_HonorsExplicitGlobalPermissionMode(t *testing.T) {
 	}
 	if sess.PermissionMode != "strict" {
 		t.Errorf("PermissionMode = %q, want %q", sess.PermissionMode, "strict")
+	}
+}
+
+// An explicit global interactive must not reach a run either — that was the
+// hang in #2613.
+func TestCreateSession_GlobalInteractiveBecomesAuto(t *testing.T) {
+	setTestHome(t)
+	if err := (config.Config{PermissionMode: "interactive"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.PermissionMode != "auto" {
+		t.Errorf("PermissionMode = %q, want %q", sess.PermissionMode, "auto")
+	}
+}
+
+// A task's own permission_mode wins over the global default, either way.
+func TestCreateSession_TaskPermissionModeOverridesGlobal(t *testing.T) {
+	for _, tc := range []struct{ global, task, want string }{
+		{global: "", task: "strict", want: "strict"},
+		{global: "strict", task: "auto", want: "auto"},
+		// A hand-written tasks.json can carry anything; interactive must not
+		// slip through to a run.
+		{global: "", task: "interactive", want: "auto"},
+	} {
+		setTestHome(t)
+		if err := (config.Config{PermissionMode: tc.global}).Save(); err != nil {
+			t.Fatal(err)
+		}
+		srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+		sessionID, err := srv.CreateSession(scheduler.Task{Name: "t", PermissionMode: tc.task})
+		if err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		sess, err := agent.LoadSession(sessionID)
+		if err != nil {
+			t.Fatalf("LoadSession: %v", err)
+		}
+		if sess.PermissionMode != tc.want {
+			t.Errorf("global %q, task %q: PermissionMode = %q, want %q", tc.global, tc.task, sess.PermissionMode, tc.want)
+		}
+	}
+}
+
+// Task files from before permission_mode existed (or hand-written ones) are
+// backfilled on load with the unattended default and persisted; a valid mode
+// is left alone.
+func TestInitScheduler_BackfillsTaskPermissionMode(t *testing.T) {
+	home := setTestHome(t)
+	if err := (config.Config{PermissionMode: "strict"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, ".octo", "tasks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for id, body := range map[string]string{
+		"old":  `{"id":"old","name":"old","cron":"0 0 9 * * *","prompt":"go"}`,
+		"bad":  `{"id":"bad","name":"bad","cron":"0 0 9 * * *","prompt":"go","permission_mode":"interactive"}`,
+		"keep": `{"id":"keep","name":"keep","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initScheduler()
+	if srv.scheduler == nil {
+		t.Fatal("scheduler not initialized")
+	}
+	t.Cleanup(srv.scheduler.Stop)
+
+	want := map[string]string{"old": "strict", "bad": "strict", "keep": "auto"}
+	for id, mode := range want {
+		task, err := srv.scheduler.Get(id)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", id, err)
+		}
+		if task.PermissionMode != mode {
+			t.Errorf("%s: permission_mode = %q, want %q", id, task.PermissionMode, mode)
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, id+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"permission_mode": "`+mode+`"`) && !strings.Contains(string(raw), `"permission_mode":"`+mode+`"`) {
+			t.Errorf("%s: file not persisted with %q: %s", id, mode, raw)
+		}
 	}
 }
 

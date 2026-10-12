@@ -30,6 +30,7 @@ the server was down is not replayed on restart.
 | `agent_id` | no | Id of the expert the run executes as; empty = the Default Agent |
 | `directory` | no | Working directory the run executes in |
 | `notify` | no | IM chats to push each run's final reply (or failure) to |
+| `permission_mode` | yes | How a run handles a tool call that would need approval: `auto` allows it, `strict` denies it. Deny rules apply either way. A run never asks, since nobody is there to answer. Tasks created before this field existed get `strict` if the global `permission_mode` is `strict`, otherwise `auto` |
 | `enabled` | yes | Whether the schedule is currently active |
 
 The prompt runs in its own session with no access to whatever conversation created the task, so it
@@ -100,7 +101,7 @@ whenever `octo serve` is up.
 # agent, notify) goes right in the create body.
 curl -s -X POST http://127.0.0.1:8088/api/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","directory":"/srv/repo"}'
+  -d '{"name":"daily-report","cron":"0 0 9 * * *","prompt":"Summarize ...","permission_mode":"auto","directory":"/srv/repo"}'
 
 curl -s http://127.0.0.1:8088/api/tasks                # list
 curl -s -X DELETE http://127.0.0.1:8088/api/tasks/{id} # delete
@@ -115,7 +116,7 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`, `agent_id`, `directory`,
-`notify` — send only what you're changing; renaming via `name` also renames the task's project (its
+`notify`, `permission_mode` — send only what you're changing; renaming via `name` also renames the task's project (its
 directory stays put). The Web UI's scheduler panel is a client of this
 same API, so a task created by `curl` shows up there and vice versa; the panel is also the
 recommended place to **smoke-test a new task's `Run` button** rather than triggering
@@ -135,6 +136,7 @@ Write `~/.octo/tasks/<id>.json` directly (`id` format `task_<unix-millis>`; file
   "cron": "0 0 9 * * *",
   "prompt": "Summarize ...",
   "directory": "/srv/repo",
+  "permission_mode": "auto",
   "enabled": true,
   "created_at": "2026-06-10T09:00:00Z"
 }

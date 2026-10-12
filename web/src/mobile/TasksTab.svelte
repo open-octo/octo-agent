@@ -7,6 +7,7 @@
   import { sessions, showToast } from '../lib/stores'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
+  import StatusTag from '../components/ui/StatusTag.svelte'
 
   let { onOpenSession }: { onOpenSession: (id: string) => void } = $props()
 
@@ -101,7 +102,16 @@
       <div class="card" class:off={!t2.enabled}>
         <div class="top">
           <div class="names">
-            <span class="name">{t2.name}</span>
+            <div class="name-row">
+              <span class="name">{t2.name}</span>
+              {#if t2.permission_mode}
+                <span class="perm">
+                  <StatusTag status={t2.permission_mode === 'strict' ? 'warning' : 'default'}>
+                    {$t(`tasks.perm_${t2.permission_mode}`)}
+                  </StatusTag>
+                </span>
+              {/if}
+            </div>
             {#if t2.agent || t2.model}<span class="target">{t2.agent || t2.model}</span>{/if}
           </div>
           <button
@@ -154,6 +164,8 @@
   .card.off .name, .card.off .cron { color: var(--m-text-3); }
   .top { display: flex; align-items: center; gap: 12px; }
   .names { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .perm { flex-shrink: 0; display: inline-flex; }
   .name { font-size: 14.5px; font-weight: 600; color: var(--m-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .target { font-size: 12px; color: var(--m-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }

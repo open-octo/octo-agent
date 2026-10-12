@@ -5,8 +5,9 @@
 //
 // Flow:
 //  1. OAuth → tenant_access_token
-//  2. POST /open-apis/ws/connection → WebSocket URL
-//  3. Connect WebSocket, listen for im.message.receive_v1 events
+//  2. POST /callback/ws/endpoint (AppID + AppSecret) → WebSocket URL
+//  3. Connect WebSocket, exchange protobuf frames (see frame.go), listen for
+//     im.message.receive_v1 events
 //  4. Send replies via POST /open-apis/im/v1/messages
 package feishu
 
@@ -21,11 +22,14 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -37,8 +41,15 @@ const (
 	platformName   = "feishu"
 	defaultDomain  = "https://open.feishu.cn"
 	reconnectDelay = 5 * time.Second
-	readDeadline   = 120 * time.Second
-	pingInterval   = 90 * time.Second
+
+	// defaultPingInterval applies only if the endpoint response carries no
+	// ClientConfig.PingInterval.
+	defaultPingInterval = 90 * time.Second
+	pongGracePeriod     = 5 * time.Second
+	// partsTTL bounds how long a split event waits for its remaining parts;
+	// maxParts rejects absurd part counts from a malformed frame.
+	partsTTL = 5 * time.Second
+	maxParts = 1024
 
 	// maxMessageBytes: Feishu's documented per-message content limits are far
 	// larger than any normal agentic reply (custom-bot webhook guidance is
@@ -162,42 +173,116 @@ func (a *Adapter) connectOnce(ctx context.Context, onMessage func(channel.Inboun
 		return fmt.Errorf("token: %w", err)
 	}
 
-	wsURL, err := a.getWSEndpoint()
+	ep, err := a.getWSEndpoint(ctx)
 	if err != nil {
 		return fmt.Errorf("ws endpoint: %w", err)
 	}
 
-	dialer := websocket.DefaultDialer
-	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, ep.URL, nil)
 	if err != nil {
-		return fmt.Errorf("connect: %w", err)
+		return fmt.Errorf("connect: %w", handshakeError(resp, err))
 	}
 	defer conn.Close()
 
+	ws := &wsConn{conn: conn}
+	ws.setPingInterval(ep.ClientConfig.PingInterval)
+	// Every ping frame carries the service id, which the endpoint only hands
+	// out inside the URL's query string.
+	if u, err := url.Parse(ep.URL); err == nil {
+		if id, err := strconv.ParseInt(u.Query().Get("service_id"), 10, 32); err == nil {
+			ws.serviceID = int32(id)
+		} else {
+			// Pings may then go unanswered and the connection time out;
+			// leave a trace of why.
+			log.Printf("[feishu] endpoint URL has no usable service_id; pinging with 0")
+		}
+	}
+
 	log.Printf("[feishu] connected to WebSocket")
 
-	// FEISHU-005: proactive ping goroutine.
+	// FEISHU-005: proactive ping goroutine. The server answers each ping
+	// with a pong that may carry an updated ClientConfig. It also closes the
+	// socket on cancellation: otherwise readEvents stays blocked until the
+	// read deadline, and a stopped adapter keeps acking events the server
+	// will then never redeliver.
 	pingCtx, cancelPing := context.WithCancel(ctx)
 	defer cancelPing()
 	go func() {
-		ticker := time.NewTicker(pingInterval)
-		defer ticker.Stop()
 		for {
+			if err := ws.ping(); err != nil {
+				log.Printf("[feishu] ping error: %v", err)
+				conn.Close()
+				return
+			}
 			select {
 			case <-pingCtx.Done():
+				conn.Close()
 				return
-			case <-ticker.C:
-				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
-					log.Printf("[feishu] ping error: %v", err)
-					conn.Close()
-					return
-				}
+			case <-time.After(ws.pingInterval()):
 			}
 		}
 	}()
 
-	return a.readEvents(ctx, conn, onMessage)
+	return a.readEvents(ctx, ws, onMessage)
 }
+
+// handshakeError surfaces the gateway's Handshake-* headers (auth failure,
+// connection limit, …) when the WebSocket upgrade is refused.
+func handshakeError(resp *http.Response, err error) error {
+	if resp == nil {
+		return err
+	}
+	status := resp.Header.Get("Handshake-Status")
+	msg := resp.Header.Get("Handshake-Msg")
+	if status == "" && msg == "" {
+		return fmt.Errorf("%w (HTTP %d)", err, resp.StatusCode)
+	}
+	return fmt.Errorf("%w (HTTP %d, handshake status %s: %s)", err, resp.StatusCode, status, msg)
+}
+
+// wsConn wraps one long connection. Both the ping goroutine and the read
+// loop's acks write to it, and gorilla allows only one concurrent writer.
+type wsConn struct {
+	conn      *websocket.Conn
+	writeMu   sync.Mutex
+	serviceID int32
+	pingNanos atomic.Int64
+}
+
+func (w *wsConn) setPingInterval(seconds int) {
+	if seconds > 0 {
+		w.pingNanos.Store(int64(time.Duration(seconds) * time.Second))
+	}
+}
+
+func (w *wsConn) pingInterval() time.Duration {
+	if d := time.Duration(w.pingNanos.Load()); d > 0 {
+		return d
+	}
+	return defaultPingInterval
+}
+
+// readTimeout matches the SDK: two missed pongs plus a grace period.
+func (w *wsConn) readTimeout() time.Duration {
+	return 2*w.pingInterval() + pongGracePeriod
+}
+
+func (w *wsConn) writeFrame(f *frame) error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	w.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	return w.conn.WriteMessage(websocket.BinaryMessage, f.marshal())
+}
+
+func (w *wsConn) pingFrame() *frame {
+	return &frame{
+		Method:  frameMethodControl,
+		Service: w.serviceID,
+		Headers: []frameHeader{{Key: hdrType, Value: "ping"}},
+	}
+}
+
+func (w *wsConn) ping() error { return w.writeFrame(w.pingFrame()) }
 
 // Stop gracefully shuts down.
 func (a *Adapter) Stop() error {
@@ -397,31 +482,70 @@ func (a *Adapter) getToken() string {
 
 // ─── WebSocket ─────────────────────────────────────────────────────────────
 
-func (a *Adapter) getWSEndpoint() (string, error) {
-	req, _ := http.NewRequest("POST", a.domain+"/open-apis/ws/connection", nil)
-	req.Header.Set("Authorization", "Bearer "+a.getToken())
+// wsClientConfig is the server-issued connection tuning. Only PingInterval
+// is honored; reconnects keep the fixed reconnectDelay.
+type wsClientConfig struct {
+	PingInterval int `json:"PingInterval"` // seconds
+}
+
+type wsEndpoint struct {
+	URL          string         `json:"URL"`
+	ClientConfig wsClientConfig `json:"ClientConfig"`
+}
+
+// getWSEndpoint asks for a long-connection URL. Unlike the OpenAPI routes,
+// this one authenticates with the app credentials in the body rather than a
+// bearer token.
+func (a *Adapter) getWSEndpoint(ctx context.Context) (wsEndpoint, error) {
+	b, _ := json.Marshal(map[string]string{"AppID": a.appID, "AppSecret": a.appSecret})
+	req, err := http.NewRequestWithContext(ctx, "POST", a.domain+"/callback/ws/endpoint", bytes.NewReader(b))
+	if err != nil {
+		return wsEndpoint{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := a.http.Do(req)
 	if err != nil {
-		return "", err
+		return wsEndpoint{}, err
 	}
 	defer resp.Body.Close()
 
-	var r struct {
-		Code int `json:"code"`
-		Data struct {
-			URL string `json:"url"`
-		} `json:"data"`
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return wsEndpoint{}, err
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return "", err
+	var r struct {
+		Code int        `json:"code"`
+		Msg  string     `json:"msg"`
+		Data wsEndpoint `json:"data"`
+	}
+	// Check the status before decoding: a plain-text body like
+	// "404 page not found" would otherwise surface as a baffling
+	// "cannot unmarshal number" error (#2611).
+	if resp.StatusCode != http.StatusOK {
+		if json.Unmarshal(body, &r) == nil && r.Msg != "" {
+			return wsEndpoint{}, fmt.Errorf("HTTP %d: code %d: %s", resp.StatusCode, r.Code, r.Msg)
+		}
+		// Truncated: this lands in a log line repeated every reconnect.
+		snippet := strings.TrimSpace(string(body))
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "…"
+		}
+		return wsEndpoint{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet)
+	}
+	if err := json.Unmarshal(body, &r); err != nil {
+		return wsEndpoint{}, err
 	}
 	if r.Code != 0 {
-		return "", fmt.Errorf("ws endpoint: code %d", r.Code)
+		return wsEndpoint{}, fmt.Errorf("code %d: %s", r.Code, r.Msg)
 	}
-	return r.Data.URL, nil
+	if r.Data.URL == "" {
+		return wsEndpoint{}, fmt.Errorf("response has no URL")
+	}
+	return r.Data, nil
 }
 
-func (a *Adapter) readEvents(ctx context.Context, conn *websocket.Conn, onMessage func(channel.InboundEvent)) error {
+func (a *Adapter) readEvents(ctx context.Context, ws *wsConn, onMessage func(channel.InboundEvent)) error {
+	pending := make(map[string]*pendingParts)
 	for {
 		select {
 		case <-ctx.Done():
@@ -430,35 +554,108 @@ func (a *Adapter) readEvents(ctx context.Context, conn *websocket.Conn, onMessag
 		}
 
 		// FEISHU-004: set read deadline before every ReadMessage call.
-		conn.SetReadDeadline(time.Now().Add(readDeadline))
+		ws.conn.SetReadDeadline(time.Now().Add(ws.readTimeout()))
 
-		_, raw, err := conn.ReadMessage()
+		msgType, raw, err := ws.conn.ReadMessage()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
 			return err
 		}
-
-		// Reset deadline after a successful read.
-		conn.SetReadDeadline(time.Time{})
-
-		var envelope struct {
-			Type string          `json:"type"`
-			Data json.RawMessage `json:"data"`
-		}
-		if err := json.Unmarshal(raw, &envelope); err != nil {
+		if msgType != websocket.BinaryMessage {
 			continue
 		}
 
-		switch envelope.Type {
-		case "ping":
-			pong, _ := json.Marshal(map[string]string{"type": "pong"})
-			conn.WriteMessage(websocket.TextMessage, pong)
-		case "message":
-			a.handleEvent(envelope.Data, onMessage)
+		f, err := unmarshalFrame(raw)
+		if err != nil {
+			log.Printf("[feishu] decode frame: %v", err)
+			continue
+		}
+
+		switch f.Method {
+		case frameMethodControl:
+			if f.header(hdrType) == "pong" && len(f.Payload) > 0 {
+				var cfg wsClientConfig
+				if json.Unmarshal(f.Payload, &cfg) == nil {
+					ws.setPingInterval(cfg.PingInterval)
+				}
+			}
+		case frameMethodData:
+			// The SDK only handles (and acks) "event" frames; "card" frames
+			// are the legacy card-callback channel.
+			if f.header(hdrType) != "event" {
+				continue
+			}
+			payload := collectParts(pending, f)
+			if payload == nil {
+				continue
+			}
+			// A stopped adapter must not ack: the event would be lost
+			// instead of redelivered to the live connection.
+			if ctx.Err() != nil {
+				return nil
+			}
+			// Ack before dispatching: handleEvent can block on attachment
+			// downloads, and a late ack invites a redelivery.
+			if err := ws.writeFrame(ackFrame(f)); err != nil {
+				return fmt.Errorf("ack: %w", err)
+			}
+			a.handleEvent(payload, onMessage)
 		}
 	}
+}
+
+// pendingParts holds the chunks of an event the server split across frames.
+type pendingParts struct {
+	parts   [][]byte
+	started time.Time
+}
+
+// collectParts returns the complete payload for f, or nil while parts of a
+// split event are still missing.
+func collectParts(pending map[string]*pendingParts, f *frame) []byte {
+	sum, _ := strconv.Atoi(f.header(hdrSum))
+	if sum <= 1 {
+		return f.Payload
+	}
+	seq, err := strconv.Atoi(f.header(hdrSeq))
+	if err != nil || seq < 0 || seq >= sum || sum > maxParts {
+		return nil
+	}
+
+	now := time.Now()
+	for id, p := range pending {
+		if now.Sub(p.started) > partsTTL {
+			delete(pending, id)
+		}
+	}
+
+	id := f.header(hdrMessageID)
+	p := pending[id]
+	if p == nil || len(p.parts) != sum {
+		p = &pendingParts{parts: make([][]byte, sum), started: now}
+		pending[id] = p
+	}
+	p.parts[seq] = f.Payload
+	var full []byte
+	for _, part := range p.parts {
+		if len(part) == 0 {
+			return nil
+		}
+		full = append(full, part...)
+	}
+	delete(pending, id)
+	return full
+}
+
+// ackFrame echoes f back with a {"code":200} payload, which is how the SDK
+// acknowledges a handled event.
+func ackFrame(f *frame) *frame {
+	ack := *f
+	ack.Headers = append(append([]frameHeader(nil), f.Headers...), frameHeader{Key: hdrBizRt, Value: "0"})
+	ack.Payload = []byte(`{"code":200}`)
+	return &ack
 }
 
 // ─── Bot info ──────────────────────────────────────────────────────────────
