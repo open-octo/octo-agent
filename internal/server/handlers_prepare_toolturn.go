@@ -109,14 +109,15 @@ func (s *Server) prepareToolTurn(ctx context.Context, a *agent.Agent, sess *agen
 	}
 	if sess != nil && sess.Source == "cron" && mode == permission.ModeInteractive {
 		// interactive was never functional for a cron tick — nobody is present
-		// to answer the ask, so it only ever hangs and denies. This also
-		// self-heals task sessions created before write_file/edit_file stopped
-		// blanket-allowing $CWD: CreateSession used to persist whatever the
+		// to answer the ask, and the ask never times out, so it only ever hangs
+		// the turn. This also self-heals task sessions created before
+		// write_file/edit_file stopped blanket-allowing $CWD: CreateSession
+		// used to persist whatever the
 		// global default resolved to at creation time (often "interactive"),
 		// and that value lives on in ~/.octo/sessions/*.json across upgrades —
 		// tasks_handlers.go's CreateSession only sets PermissionMode for a
 		// session it creates, never for one it reuses, so an old task would
-		// otherwise be stuck denying every write forever.
+		// otherwise hang on its first write forever.
 		mode = permission.ResolveUnattendedDefaultMode()
 	}
 	engine, err := permission.New(permissionConfigPath(), a.CWD, mode, s.memoryWriteRoots()...)

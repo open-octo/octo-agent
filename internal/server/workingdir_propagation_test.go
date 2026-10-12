@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/open-octo/octo-agent/internal/agent"
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/tools"
 )
 
@@ -38,6 +39,38 @@ func TestPrepareToolTurn_CronSessionSelfHealsFromStaleInteractiveMode(t *testing
 	allowed, reason := a.Gate.Check(ctx, "write_file", map[string]any{"path": dir + "/out.txt"})
 	if !allowed {
 		t.Errorf("write_file under a stale-interactive cron session: got denied (%q), want allowed (self-heal to auto)", reason)
+	}
+}
+
+// A global `permission_mode: interactive` in config.yml must not leak into a
+// cron tick either: the self-heal used to resolve through a helper that
+// passed explicit interactive straight back, so the tick parked on an ask
+// nobody could answer, forever and with nothing logged (#2613).
+func TestPrepareToolTurn_CronSessionIgnoresExplicitGlobalInteractive(t *testing.T) {
+	setTestHome(t)
+	cfg := config.Config{PermissionMode: "interactive"}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+
+	dir := t.TempDir()
+	a := agent.New(&stubSender{}, "qwen3.7-max")
+	a.CWD = dir
+
+	sess := agent.NewSession(a.Model, "")
+	sess.Source = "cron"
+	sess.PermissionMode = "interactive"
+
+	ctx, _, _, cleanup, err := srv.prepareToolTurn(prepareToolTurnCtx(t, "cron-global-interactive"), a, sess)
+	if err != nil {
+		t.Fatalf("prepareToolTurn: %v", err)
+	}
+	defer cleanup()
+
+	allowed, reason := a.Gate.Check(ctx, "write_file", map[string]any{"path": dir + "/out.txt"})
+	if !allowed {
+		t.Errorf("write_file under a cron session with global interactive: got denied (%q), want allowed (auto)", reason)
 	}
 }
 

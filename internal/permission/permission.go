@@ -80,25 +80,18 @@ func ResolveDefaultMode() Mode {
 
 // ResolveUnattendedDefaultMode is ResolveDefaultMode for sessions that run
 // with nobody present to answer an ask prompt — currently cron task
-// sessions (see tasks_handlers.go's CreateSession). An explicit
-// ~/.octo/config.yml `permission_mode` is honored exactly like
-// ResolveDefaultMode; only the "nothing configured" fallback differs. Since
-// write_file/edit_file no longer blanket-allow $CWD (see defaults.yml),
-// ModeInteractive's implicit ask has no one to answer it — every write
-// would time out to deny — so an unset global mode resolves to
-// ModeAutoApprove here instead.
+// sessions (see tasks_handlers.go's newSession). An explicit strict is
+// honored; anything else, explicit interactive included, resolves to
+// ModeAutoApprove. A permission ask waits for an answer with no timeout
+// (see requestConfirmation), so interactive here would park the turn
+// forever with nothing logged. Deny rules still apply under auto — the
+// mode only decides how an ask verdict resolves.
 func ResolveUnattendedDefaultMode() Mode {
 	cfg, _ := config.Load()
-	switch cfg.PermissionMode {
-	case string(ModeAutoApprove):
-		return ModeAutoApprove
-	case string(ModeStrict):
+	if cfg.PermissionMode == string(ModeStrict) {
 		return ModeStrict
-	case string(ModeInteractive):
-		return ModeInteractive
-	default:
-		return ModeAutoApprove
 	}
+	return ModeAutoApprove
 }
 
 // Rule is one entry in the rule list for a tool. Exactly one of Pattern /
