@@ -31,6 +31,8 @@ type taskRequest struct {
 	AgentID   string                  `json:"agent_id,omitempty"`
 	Directory string                  `json:"directory,omitempty"`
 	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
+	// Enabled defaults to true when omitted.
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 type taskResponse struct {
@@ -584,7 +586,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		AgentID:   req.AgentID,
 		Directory: req.Directory,
 		Notify:    req.Notify,
-		Enabled:   true,
+		Enabled:   req.Enabled == nil || *req.Enabled,
 	}
 	if err := s.scheduler.Add(&task); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

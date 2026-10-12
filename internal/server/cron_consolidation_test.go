@@ -262,6 +262,25 @@ func TestCreateTask_RejectsUnknownField(t *testing.T) {
 	}
 }
 
+// TestCreateTask_Enabled: enabled is optional on create and defaults to true;
+// an explicit false creates the task paused instead of being ignored.
+func TestCreateTask_Enabled(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	createTaskForTest(t, srv, `{"name":"on","cron":"0 0 9 * * *","prompt":"go"}`)
+	createTaskForTest(t, srv, `{"name":"off","cron":"0 0 9 * * *","prompt":"go","enabled":false}`)
+
+	for _, task := range listTasksForTest(t, srv) {
+		want := task.Name == "on"
+		if task.Enabled != want {
+			t.Errorf("task %q enabled = %v, want %v", task.Name, task.Enabled, want)
+		}
+	}
+}
+
 // TestDeleteTask_DeletesGroupKeepsSessions: deleting a task deletes its group,
 // but the group's member sessions stay on disk (they fall back to ungrouped).
 func TestDeleteTask_DeletesGroupKeepsSessions(t *testing.T) {
