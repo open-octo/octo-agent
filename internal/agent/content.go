@@ -83,6 +83,11 @@ type ContentBlock struct {
 	// block only to the same model and drop it otherwise.
 	Model string `json:"model,omitempty"`
 
+	// Phase labels an OpenAI Responses assistant message as "commentary" or
+	// "final_answer" (type=="text"). Newer models want it resent unchanged on
+	// follow-up requests; other adapters ignore it.
+	Phase string `json:"phase,omitempty"`
+
 	// Reasoning carries an OpenAI-protocol thinking model's reasoning trace that
 	// must be echoed back on the next request (type=="tool_use"). deepseek-v4
 	// returns reasoning_content alongside a tool call and rejects the follow-up

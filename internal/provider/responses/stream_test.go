@@ -163,3 +163,19 @@ func TestSendStream_TruncatedIsTransient(t *testing.T) {
 		t.Fatalf("err = %v, want a transient stream error", err)
 	}
 }
+
+// A backend that omits output_index must not lose items to collisions on 0.
+func TestSendStream_DoneItemsWithoutOutputIndex(t *testing.T) {
+	body := sse(
+		`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"checking"}]}}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"x","arguments":"{}"}}`,
+		`{"type":"response.completed","response":{"status":"completed"}}`,
+	)
+	resp, err := streamClient(t, body).SendStream(context.Background(), streamReq, provider.StreamCallbacks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Blocks) != 2 || resp.Blocks[0].Text != "checking" || resp.Blocks[1].ID != "call_1" {
+		t.Errorf("blocks = %+v, want text then tool_use", resp.Blocks)
+	}
+}

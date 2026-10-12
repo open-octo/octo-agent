@@ -73,7 +73,7 @@ func (c *Client) SendStream(ctx context.Context, req provider.Request, cb provid
 		reasoning   = map[string]*strings.Builder{} // item_id → streamed reasoning text
 		tools       = map[string]*toolCallState{}   // item_id → call
 		toolOrder   []string
-		doneItems   = map[int]outputItem{} // output_index → completed item
+		doneItems   []doneItem
 		sawEvent    bool
 		sawTerminal bool
 	)
@@ -140,7 +140,7 @@ scan:
 			// The done item is authoritative: a reasoning item's
 			// encrypted_content can be incomplete on the added event.
 			if ev.Item != nil {
-				doneItems[ev.OutputIndex] = *ev.Item
+				doneItems = append(doneItems, doneItem{ev.OutputIndex, *ev.Item})
 			}
 		case "response.completed", "response.incomplete":
 			if ev.Response != nil {
@@ -192,18 +192,23 @@ scan:
 	return out, nil
 }
 
-func orderedItems(done map[int]outputItem) []outputItem {
+// doneItem is one response.output_item.done payload with its output_index.
+type doneItem struct {
+	index int
+	item  outputItem
+}
+
+// orderedItems sorts done items by output_index. The sort is stable and items
+// are collected in arrival order, so a backend that omits output_index (every
+// item reads as 0) still yields all of them, in the order they streamed.
+func orderedItems(done []doneItem) []outputItem {
 	if len(done) == 0 {
 		return nil
 	}
-	idx := make([]int, 0, len(done))
-	for i := range done {
-		idx = append(idx, i)
-	}
-	sort.Ints(idx)
-	out := make([]outputItem, 0, len(idx))
-	for _, i := range idx {
-		out = append(out, done[i])
+	sort.SliceStable(done, func(i, j int) bool { return done[i].index < done[j].index })
+	out := make([]outputItem, len(done))
+	for i, d := range done {
+		out[i] = d.item
 	}
 	return out
 }

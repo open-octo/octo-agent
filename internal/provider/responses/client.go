@@ -301,7 +301,9 @@ func toBlocks(model string, output []outputItem) []agent.ContentBlock {
 				sb.WriteString(p.Refusal)
 			}
 			if sb.Len() > 0 {
-				blocks = append(blocks, agent.NewTextBlock(sb.String()))
+				b := agent.NewTextBlock(sb.String())
+				b.Phase = it.Phase
+				blocks = append(blocks, b)
 			}
 		case "function_call":
 			blocks = append(blocks, agent.NewToolUseBlockFromJSON(it.CallID, it.Name, it.Arguments))

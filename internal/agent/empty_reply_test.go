@@ -153,3 +153,21 @@ func TestRun_ToolRoundStaysSilent(t *testing.T) {
 		t.Errorf("tool round logged %q, want silence", out)
 	}
 }
+
+// A Responses reasoning item has no readable text but must survive into
+// history so its encrypted content replays on later turns — yet only next to
+// reply text, never as a Blocks-only message with nothing to show.
+func TestAssistantReplyMessage_KeepsReasoningItem(t *testing.T) {
+	item := ContentBlock{Type: "thinking", ID: "rs_1", Signature: "ENC", Model: "m"}
+
+	msg := assistantReplyMessage(Reply{Content: "answer", Blocks: []ContentBlock{item, NewTextBlock("answer")}}, false)
+	if len(msg.Blocks) != 2 || msg.Blocks[0].ID != "rs_1" {
+		t.Errorf("Blocks = %+v, want the reasoning item kept", msg.Blocks)
+	}
+
+	captureAgentSlog(t)
+	empty := assistantReplyMessage(Reply{Blocks: []ContentBlock{item}}, false)
+	if empty.Blocks != nil || empty.Content != "[no content]" {
+		t.Errorf("reasoning-only reply = %+v, want the plain placeholder", empty)
+	}
+}

@@ -114,3 +114,22 @@ func TestToInput_ReasoningReplayRules(t *testing.T) {
 		})
 	}
 }
+
+// An assistant message's phase is read from the output and resent unchanged.
+func TestPhaseRoundTrip(t *testing.T) {
+	blocks := toBlocks("m", []outputItem{
+		{Type: "message", Phase: "commentary", Content: []outputContent{{Type: "output_text", Text: "looking"}}},
+		{Type: "message", Phase: "final_answer", Content: []outputContent{{Type: "output_text", Text: "done"}}},
+	})
+	if len(blocks) != 2 || blocks[0].Phase != "commentary" || blocks[1].Phase != "final_answer" {
+		t.Fatalf("blocks = %+v", blocks)
+	}
+	got := inputJSON(t, "m", []agent.Message{{Role: agent.RoleAssistant, Blocks: blocks}})
+	if got[0]["phase"] != "commentary" || got[1]["phase"] != "final_answer" {
+		t.Errorf("input = %v, want phases resent", got)
+	}
+	plain := inputJSON(t, "m", []agent.Message{agent.NewAssistantMessage("hi")})
+	if _, ok := plain[0]["phase"]; ok {
+		t.Errorf("phase sent on a message that never had one: %v", plain[0])
+	}
+}

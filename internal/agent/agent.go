@@ -2323,6 +2323,11 @@ func flattenResults(slices [][]ContentBlock) []ContentBlock {
 // round-tripping those blocks is the same contract already honored for tool-use
 // turns, and the OpenAI adapter ignores the thinking block and falls back to
 // Content. Plain replies with no thinking keep the lightweight Content form.
+//
+// An OpenAI Responses reasoning item usually has no readable text (octo
+// doesn't request summaries) but its encrypted content is replayed to the same
+// model on later turns, so it is kept too — only alongside reply text, since a
+// Blocks form with nothing but an opaque item would replay as empty content.
 func assistantReplyMessage(reply Reply, carriedText bool) Message {
 	content := reply.Content
 	if content == "" {
@@ -2332,7 +2337,7 @@ func assistantReplyMessage(reply Reply, carriedText bool) Message {
 		logEmptyReply(reply, carriedText)
 	}
 	msg := NewAssistantMessage(content)
-	if hasThinkingBlock(reply.Blocks) {
+	if hasThinkingBlock(reply.Blocks) || (content != "" && hasReasoningItem(reply.Blocks)) {
 		msg.Blocks = reply.Blocks
 	}
 	return msg
@@ -2390,6 +2395,17 @@ func logEmptyReply(reply Reply, carriedText bool) {
 func hasThinkingBlock(blocks []ContentBlock) bool {
 	for _, b := range blocks {
 		if b.Type == "thinking" && b.Thinking != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasReasoningItem reports whether blocks carries an OpenAI Responses
+// reasoning item (a "thinking" block with an ID and encrypted content).
+func hasReasoningItem(blocks []ContentBlock) bool {
+	for _, b := range blocks {
+		if b.Type == "thinking" && b.ID != "" && b.Signature != "" {
 			return true
 		}
 	}

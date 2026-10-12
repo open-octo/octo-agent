@@ -38,6 +38,8 @@ type apiReasoning struct {
 type inputMessage struct {
 	Role    string `json:"role"` // "user" | "assistant"
 	Content any    `json:"content"`
+	// Phase is resent on assistant messages as the model returned it.
+	Phase string `json:"phase,omitempty"`
 }
 
 type inputPart struct {
@@ -100,6 +102,7 @@ type outputItem struct {
 
 	// message
 	Content []outputContent `json:"content"`
+	Phase   string          `json:"phase"`
 
 	// function_call
 	CallID    string `json:"call_id"`

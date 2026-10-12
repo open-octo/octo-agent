@@ -43,7 +43,7 @@ func appendAssistantBlocks(out []any, model string, blocks []agent.ContentBlock)
 			}
 		case "text":
 			if b.Text != "" {
-				out = append(out, inputMessage{Role: "assistant", Content: b.Text})
+				out = append(out, inputMessage{Role: "assistant", Content: b.Text, Phase: b.Phase})
 			}
 		case "tool_use":
 			out = append(out, functionCallItem{
