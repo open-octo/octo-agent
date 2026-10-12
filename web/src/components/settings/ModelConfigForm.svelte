@@ -130,7 +130,10 @@
     if (preset) {
       model = preset.default_model || ''
       baseUrl = preset.base_url || ''
-      applyPresetVision()
+      // A Custom model has no catalogue entry, so don't carry over the last
+      // vendor's value; start from the same default as the add-endpoint form.
+      if (isCustom) vision = true
+      else applyPresetVision()
     }
   }
 
