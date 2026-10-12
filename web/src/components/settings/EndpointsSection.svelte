@@ -402,10 +402,10 @@
       }
     }
 
-    // Same reasoning as headers: a bad window blocks the save. Named vendors
-    // never show the field, so a value typed under Custom before switching
-    // vendor is ignored rather than validated.
-    const win = !editing && isCustom ? parseContextWindow(fWin) : 0
+    // Same reasoning as headers: a bad window blocks the save. The window
+    // belongs to the initial model, so it is only read when that model is
+    // sent — not for named vendors (no field) or an empty model name.
+    const win = !editing && isCustom && fModel.trim() ? parseContextWindow(fWin) : 0
     if (win === null) {
       showToast(tr('settings.endpoints.context_window.invalid'), 'error')
       return
