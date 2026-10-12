@@ -1449,6 +1449,7 @@ export interface ModelConfigInput {
   reasoning_effort?: string
   show_reasoning?: boolean
   vision?: boolean
+  context_window?: number
 }
 
 export interface TestConfigResult {
@@ -1488,7 +1489,8 @@ export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; i
       api_key: req.api_key || undefined, // empty = keep the stored key (server-side "unchanged" rule)
       protocol,
     })
-    await addEndpointModel(endpointID, req.model, req.vision ?? false)
+    // Undefined omits the window, so a re-run keeps one already set.
+    await addEndpointModel(endpointID, req.model, req.vision ?? false, req.context_window)
   } else {
     await createEndpoint({
       id: endpointID,
@@ -1496,7 +1498,7 @@ export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; i
       base_url: req.base_url || undefined,
       api_key: req.api_key || undefined,
       protocol,
-      models: [{ model: req.model, vision: req.vision ?? false }],
+      models: [{ model: req.model, vision: req.vision ?? false, context_window: req.context_window }],
     })
   }
   // Set as default, pinned to the exact model just saved — neither path above

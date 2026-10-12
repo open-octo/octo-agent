@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import { t } from '../../lib/i18n'
   import * as api from '../../lib/api'
+  import { parseContextWindow } from '../../lib/contextWindow'
   import type { ProviderPreset, ModelEntry, ModelConfigInput, Protocol } from '../../lib/api'
   import Switch from '../ui/Switch.svelte'
   import ApiKeyInput from './ApiKeyInput.svelte'
@@ -54,6 +55,9 @@
   // gets the picked model's catalogue value (via applyPresetVision on select),
   // falling back to true until the user picks or toggles.
   let vision       = $state(seed.vision ?? true)
+  // Custom only: a model the built-in table doesn't know falls back to 128k.
+  // Empty sends nothing, so re-running the wizard keeps a window already set.
+  let ctxWin       = $state('')
 
   let testing      = $state(false)
   let saving       = $state(false)
@@ -154,6 +158,8 @@
       provider: providerID,
       protocol: wire,
     }
+    const win = isCustom ? parseContextWindow(ctxWin) : 0
+    if (win) req.context_window = win
     // Onboard hides prefs; leave them to server defaults + the /onboard ceremony.
     // (Vision, when omitted, is resolved server-side from the catalogue/heuristic.)
     if (showPrefs) {
@@ -169,8 +175,18 @@
     return !!model.trim() && !!baseUrl.trim() && (!requireKey || isCustom || !!apiKey.trim())
   }
 
+  // A bad window must not be dropped silently on save.
+  function windowInvalid(): boolean {
+    if (isCustom && parseContextWindow(ctxWin) === null) {
+      result = { ok: false, msg: $t('settings.endpoints.context_window.invalid') }
+      return true
+    }
+    return false
+  }
+
   async function handleTest() {
     if (!valid()) { result = { ok: false, msg: $t('models.error.required') }; return }
+    if (windowInvalid()) return
     testing = true
     result = null
     try {
@@ -185,6 +201,7 @@
 
   async function handleSubmit() {
     if (!valid()) { result = { ok: false, msg: $t('models.error.required') }; return }
+    if (windowInvalid()) return
     saving = true
     try {
       // Test the connection first — the button label says "Test connection and continue"
@@ -255,6 +272,20 @@
       />
     {/if}
   </label>
+
+  <!-- Context window (Custom only — named vendors' models are in the built-in table) -->
+  {#if isCustom}
+    <label class="field">
+      <span class="field-label">{$t('settings.endpoints.context_window')}</span>
+      <input
+        class="field-input mono"
+        type="text"
+        placeholder={$t('settings.endpoints.context_window.placeholder')}
+        bind:value={ctxWin}
+        disabled={saving}
+      />
+    </label>
+  {/if}
 
   <!-- Base URL -->
   <label class="field">
