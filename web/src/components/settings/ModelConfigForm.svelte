@@ -2,7 +2,7 @@
   import { untrack } from 'svelte'
   import { t } from '../../lib/i18n'
   import * as api from '../../lib/api'
-  import type { ProviderPreset, ModelEntry, ModelConfigInput } from '../../lib/api'
+  import type { ProviderPreset, ModelEntry, ModelConfigInput, Protocol } from '../../lib/api'
   import Switch from '../ui/Switch.svelte'
   import ApiKeyInput from './ApiKeyInput.svelte'
   import VariantChips from './VariantChips.svelte'
@@ -44,8 +44,8 @@
   let model        = $state(seed.model || (seed as Partial<ModelEntry>).id || '')
   let baseUrl      = $state(seed.base_url ?? '')
   // Protocol is only meaningful for the Custom vendor; seed from the entry's
-  // stored wire format (surfaced as anthropic_format) so an edit round-trips.
-  let protocol     = $state<'openai' | 'anthropic'>(seed.anthropic_format ? 'anthropic' : 'openai')
+  // stored wire format so an edit round-trips.
+  let protocol     = $state<Protocol>(api.normalizeProtocol(seed.protocol))
   let apiKey       = $state('')            // never prefilled; placeholder shows the masked key
   let permMode     = $state(seed.permission_mode ?? 'interactive')
   let reasoning    = $state(seed.reasoning_effort ?? 'off')
@@ -143,16 +143,16 @@
   // Custom vendor (or a hand-typed endpoint with no preset) the user picks it.
   function buildReq(): ModelConfigInput {
     const providerID = preset ? preset.id : 'custom'
-    const anthropic = isCustom
-      ? protocol === 'anthropic'
-      : !!(preset && preset.api === 'anthropic-messages')
+    const wire: Protocol | undefined = isCustom
+      ? protocol
+      : (preset && preset.api === 'anthropic-messages' ? 'anthropic' : undefined)
     const req: ModelConfigInput = {
       type: 'default',
       model: model.trim(),
       base_url: baseUrl.trim(),
       api_key: apiKey.trim(),
       provider: providerID,
-      anthropic_format: anthropic,
+      protocol: wire,
     }
     // Onboard hides prefs; leave them to server defaults + the /onboard ceremony.
     // (Vision, when omitted, is resolved server-side from the catalogue/heuristic.)
@@ -228,6 +228,7 @@
       <select class="field-input" bind:value={protocol} disabled={saving}>
         <option value="openai">{$t('models.protocol.openai')}</option>
         <option value="anthropic">{$t('models.protocol.anthropic')}</option>
+        <option value="openai-responses">{$t('models.protocol.openai_responses')}</option>
       </select>
     </label>
   {/if}

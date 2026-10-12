@@ -47,7 +47,7 @@
         provider: match.provider,
         model: modelName,
         base_url: match.base_url ?? '',
-        anthropic_format: match.protocol === 'anthropic',
+        protocol: api.normalizeProtocol(match.protocol),
         permission_mode: cfg.permission_mode,
         reasoning_effort: cfg.reasoning_effort,
         show_reasoning: cfg.show_reasoning,

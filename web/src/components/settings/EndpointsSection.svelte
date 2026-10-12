@@ -32,7 +32,7 @@
   let fProvider = $state('')
   let fBaseUrl  = $state('')
   let fApiKey   = $state('')
-  let fProtocol = $state<'openai' | 'anthropic'>('openai')
+  let fProtocol = $state<api.Protocol>('openai')
   let fModel    = $state('')  // create only: optional first model
   let fVision   = $state(true)
   // Raw JSON text for the custom-headers textarea; parsed on submit. Unlike
@@ -326,7 +326,7 @@
     fProvider = ep.provider
     fBaseUrl = ep.base_url ?? ''
     fApiKey = ''
-    fProtocol = ep.protocol === 'anthropic' ? 'anthropic' : 'openai'
+    fProtocol = api.normalizeProtocol(ep.protocol)
     fHeadersText = ep.headers && Object.keys(ep.headers).length > 0 ? JSON.stringify(ep.headers, null, 2) : ''
     fIdTouched = true
     view = 'form'
@@ -397,7 +397,7 @@
         if (fApiKey) patch.api_key = fApiKey
         // Normalise the stored protocol the same way openEdit seeds the select
         // (absent = openai), so an untouched select never produces a patch.
-        const prevProtocol = editing.protocol === 'anthropic' ? 'anthropic' : 'openai'
+        const prevProtocol = api.normalizeProtocol(editing.protocol)
         if (isCustom && fProtocol !== prevProtocol) patch.protocol = fProtocol
         // headers is a full-replacement patch (server: nil = unchanged, {} =
         // clear all). Only include it when the textarea's parsed value
@@ -506,6 +506,7 @@
         <select class="field-input" bind:value={fProtocol} disabled={busy}>
           <option value="openai">{$t('models.protocol.openai')}</option>
           <option value="anthropic">{$t('models.protocol.anthropic')}</option>
+          <option value="openai-responses">{$t('models.protocol.openai_responses')}</option>
         </select>
       </label>
     {/if}

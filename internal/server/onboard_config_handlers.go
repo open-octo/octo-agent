@@ -74,25 +74,6 @@ func buildProviderPresets() []providerPreset {
 	return presets
 }
 
-// customProtocol maps the web form's anthropic_format toggle to the stored
-// protocol string ("anthropic" | "openai") for the Custom vendor.
-func customProtocol(anthropicFormat bool) string {
-	if anthropicFormat {
-		return "anthropic"
-	}
-	return "openai"
-}
-
-// entryUsesAnthropic reports whether an entry speaks the Anthropic wire format,
-// so the web form's anthropic_format toggle round-trips. Named vendors use their
-// registry protocol; the Custom vendor carries it in the entry's Protocol field.
-func entryUsesAnthropic(e config.ModelEntry) bool {
-	if app.VendorNeedsProtocol(e.Provider) {
-		return e.Protocol == "anthropic"
-	}
-	return app.IsAnthropicProtocol(e.Provider)
-}
-
 // ─── GET /api/providers ─────────────────────────────────────────────────────
 
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
@@ -771,12 +752,14 @@ func maskKey(k string) string {
 // ─── POST /api/config/test ──────────────────────────────────────────────────
 
 type testConfigRequest struct {
-	Model           string `json:"model"`
-	BaseURL         string `json:"base_url"`
-	APIKey          string `json:"api_key"`
-	Provider        string `json:"provider,omitempty"`
-	Index           int    `json:"index"`
-	AnthropicFormat bool   `json:"anthropic_format"`
+	Model    string `json:"model"`
+	BaseURL  string `json:"base_url"`
+	APIKey   string `json:"api_key"`
+	Provider string `json:"provider,omitempty"`
+	Index    int    `json:"index"`
+	// Protocol is the Custom vendor's wire format ("openai" | "anthropic" |
+	// "openai-responses"); empty means openai. Named vendors ignore it.
+	Protocol string `json:"protocol,omitempty"`
 }
 
 // storedAPIKey returns the saved key of the endpoint that best matches
@@ -822,7 +805,10 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 	// The Custom vendor has no fixed wire format; derive it from the request.
 	protocol := ""
 	if app.VendorNeedsProtocol(providerName) {
-		protocol = customProtocol(req.AnthropicFormat)
+		protocol = req.Protocol
+		if protocol == "" {
+			protocol = "openai"
+		}
 	}
 
 	// Resolve the key. An empty or still-masked field means "unchanged" — the

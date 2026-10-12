@@ -1058,6 +1058,15 @@ export async function deleteProfile(name: string): Promise<void> {
 
 // Config & Version
 
+// Protocol is the wire format a Custom endpoint speaks (config `protocol`).
+export type Protocol = 'openai' | 'anthropic' | 'openai-responses'
+
+// normalizeProtocol reads a stored protocol, treating absent or unknown as
+// openai — the server's default for a Custom endpoint.
+export function normalizeProtocol(p?: string): Protocol {
+  return p === 'anthropic' || p === 'openai-responses' ? p : 'openai'
+}
+
 // Mirrors server modelConfig (onboard_config_handlers.go). api_key is returned
 // masked; type is "default" | "lite" | "" .
 export interface ModelEntry {
@@ -1067,7 +1076,7 @@ export interface ModelEntry {
   base_url?: string
   api_key_masked?: string
   provider?: string
-  anthropic_format?: boolean
+  protocol?: Protocol
   permission_mode?: string
   reasoning_effort?: string
   show_reasoning?: boolean
@@ -1435,7 +1444,7 @@ export interface ModelConfigInput {
   base_url: string
   api_key?: string
   provider?: string
-  anthropic_format?: boolean
+  protocol?: Protocol
   permission_mode?: string
   reasoning_effort?: string
   show_reasoning?: boolean
@@ -1467,7 +1476,7 @@ export async function testConfig(req: ModelConfigInput & { index?: number }): Pr
 // instead of re-POSTing; only a genuinely new id goes through createEndpoint.
 export async function saveModel(req: ModelConfigInput): Promise<{ ok: boolean; id?: string }> {
   const provider = req.provider || 'custom'
-  const protocol = req.anthropic_format ? 'anthropic' : (provider === 'custom' ? 'openai' : undefined)
+  const protocol = req.protocol ?? (provider === 'custom' ? 'openai' : undefined)
   // Resolve existing endpoints to generate a unique, readable id.
   const ep = await getEndpoints().catch(() => ({ endpoints: [], default: '', lite: '' }))
   const endpointID = generateEndpointID(provider, req.base_url || '', ep.endpoints)

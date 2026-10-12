@@ -92,3 +92,39 @@ func TestSenderForEntry_CustomKeyless(t *testing.T) {
 		t.Fatal("senderForEntry: a keyless named vendor must still error")
 	}
 }
+
+// The protocol field picks the Custom vendor's wire format, so testing an
+// openai-responses endpoint probes /v1/responses, not chat/completions.
+func TestHandleTestConfig_CustomProtocol(t *testing.T) {
+	setTestHome(t)
+	t.Setenv("CUSTOM_API_KEY", "")
+
+	for _, tc := range []struct{ protocol, wantPath, reply string }{
+		{"", "/v1/chat/completions", `{"id":"x","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"!"},"finish_reason":"stop"}]}`},
+		{"openai-responses", "/v1/responses", `{"model":"m","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"!"}]}]}`},
+		{"anthropic", "/v1/messages", `{"id":"msg","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"!"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			var path string
+			mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path = r.URL.Path
+				_, _ = w.Write([]byte(tc.reply))
+			}))
+			defer mock.Close()
+
+			srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+			w := doJSON(t, srv, http.MethodPost, "/api/config/test",
+				`{"model":"m","base_url":"`+mock.URL+`/v1","provider":"custom","protocol":"`+tc.protocol+`"}`)
+			var body map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body["ok"] != true {
+				t.Fatalf("ok = %v; msg=%v", body["ok"], body["message"])
+			}
+			if path != tc.wantPath {
+				t.Errorf("probed %q, want %q", path, tc.wantPath)
+			}
+		})
+	}
+}
