@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,6 +158,53 @@ func TestCreateSession_TaskPermissionModeOverridesGlobal(t *testing.T) {
 		}
 		if sess.PermissionMode != tc.want {
 			t.Errorf("global %q, task %q: PermissionMode = %q, want %q", tc.global, tc.task, sess.PermissionMode, tc.want)
+		}
+	}
+}
+
+// Task files from before permission_mode existed (or hand-written ones) are
+// backfilled on load with the unattended default and persisted; a valid mode
+// is left alone.
+func TestInitScheduler_BackfillsTaskPermissionMode(t *testing.T) {
+	home := setTestHome(t)
+	if err := (config.Config{PermissionMode: "strict"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, ".octo", "tasks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for id, body := range map[string]string{
+		"old":  `{"id":"old","name":"old","cron":"0 0 9 * * *","prompt":"go"}`,
+		"bad":  `{"id":"bad","name":"bad","cron":"0 0 9 * * *","prompt":"go","permission_mode":"interactive"}`,
+		"keep": `{"id":"keep","name":"keep","cron":"0 0 9 * * *","prompt":"go","permission_mode":"auto"}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initScheduler()
+	if srv.scheduler == nil {
+		t.Fatal("scheduler not initialized")
+	}
+	t.Cleanup(srv.scheduler.Stop)
+
+	want := map[string]string{"old": "strict", "bad": "strict", "keep": "auto"}
+	for id, mode := range want {
+		task, err := srv.scheduler.Get(id)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", id, err)
+		}
+		if task.PermissionMode != mode {
+			t.Errorf("%s: permission_mode = %q, want %q", id, task.PermissionMode, mode)
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, id+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"permission_mode": "`+mode+`"`) && !strings.Contains(string(raw), `"permission_mode":"`+mode+`"`) {
+			t.Errorf("%s: file not persisted with %q: %s", id, mode, raw)
 		}
 	}
 }

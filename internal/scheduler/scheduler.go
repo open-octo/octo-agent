@@ -65,10 +65,10 @@ type Task struct {
 	Directory string        `json:"directory,omitempty"`
 	Notify    NotifyTargets `json:"notify,omitempty"`
 	// PermissionMode is how each run resolves an ask verdict: "auto" or
-	// "strict". Empty follows the global default for unattended sessions
-	// (permission.ResolveUnattendedDefaultMode). Never "interactive" — a run
-	// has nobody to answer the ask.
-	PermissionMode string    `json:"permission_mode,omitempty"`
+	// "strict", never "interactive" — a run has nobody to answer the ask.
+	// Required; a task file without one is backfilled when the server loads
+	// it (see Server.initScheduler).
+	PermissionMode string    `json:"permission_mode"`
 	Enabled        bool      `json:"enabled"`
 	CreatedAt      time.Time `json:"created_at"`
 	LastRun        time.Time `json:"last_run,omitempty"`
@@ -324,6 +324,21 @@ func (s *Scheduler) SetSessionGroup(id, groupID string) error {
 		return fmt.Errorf("task %q not found", id)
 	}
 	t.SessionGroupID = groupID
+	cp := *t
+	s.mu.Unlock()
+	return s.save(cp)
+}
+
+// SetPermissionMode persists a task's permission mode without touching its
+// schedule.
+func (s *Scheduler) SetPermissionMode(id, mode string) error {
+	s.mu.Lock()
+	t, ok := s.tasks[id]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("task %q not found", id)
+	}
+	t.PermissionMode = mode
 	cp := *t
 	s.mu.Unlock()
 	return s.save(cp)

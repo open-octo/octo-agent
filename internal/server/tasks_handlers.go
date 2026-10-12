@@ -31,8 +31,8 @@ type taskRequest struct {
 	AgentID   string                  `json:"agent_id,omitempty"`
 	Directory string                  `json:"directory,omitempty"`
 	Notify    scheduler.NotifyTargets `json:"notify,omitempty"`
-	// PermissionMode: "auto", "strict", or empty to follow the global default.
-	PermissionMode string `json:"permission_mode,omitempty"`
+	// PermissionMode is required: "auto" or "strict".
+	PermissionMode string `json:"permission_mode"`
 }
 
 type taskResponse struct {
@@ -45,7 +45,7 @@ type taskResponse struct {
 	AgentID        string                  `json:"agent_id,omitempty"`
 	Directory      string                  `json:"directory,omitempty"`
 	Notify         scheduler.NotifyTargets `json:"notify,omitempty"`
-	PermissionMode string                  `json:"permission_mode,omitempty"`
+	PermissionMode string                  `json:"permission_mode"`
 	Enabled        bool                    `json:"enabled"`
 	CreatedAt      string                  `json:"created_at,omitempty"`
 	LastRun        string                  `json:"last_run,omitempty"`
@@ -73,8 +73,25 @@ func (s *Server) initScheduler() {
 		slog.Error("scheduler", "err", err)
 		return
 	}
+	backfillTaskPermissionModes(sch)
 	sch.Start()
 	s.scheduler = sch
+}
+
+// backfillTaskPermissionModes gives every task a valid permission_mode. Tasks
+// created before the field existed — or written by hand — get the mode they
+// were effectively running under, the unattended default, persisted so it
+// shows on the task and no longer tracks later global config changes.
+func backfillTaskPermissionModes(sch *scheduler.Scheduler) {
+	mode := string(permission.ResolveUnattendedDefaultMode())
+	for _, t := range sch.List() {
+		if validateTaskPermissionMode(t.PermissionMode) == nil {
+			continue
+		}
+		if err := sch.SetPermissionMode(t.ID, mode); err != nil {
+			slog.Warn("cron: backfill permission_mode", "task", t.Name, "err", err)
+		}
+	}
 }
 
 // createCronProject creates the project a task's runs cluster under. The
@@ -179,10 +196,11 @@ func (s *Server) newSession(task scheduler.Task) (string, error) {
 	// Cron ticks have no human to answer an ask prompt, unlike the web/IM
 	// default this mirrors — see ResolveUnattendedDefaultMode's doc comment.
 	// Every run is a fresh session, so this is the only place a run's mode
-	// is decided. The validity check covers tasks.json written by hand (the
-	// cron-task-creator file fallback), which never passes the API's check.
+	// is decided. The fallback only covers a task file written by hand while
+	// the server was running; backfillTaskPermissionModes fixes it on the next
+	// load.
 	mode := permission.ResolveUnattendedDefaultMode()
-	if task.PermissionMode != "" && validateTaskPermissionMode(task.PermissionMode) == nil {
+	if validateTaskPermissionMode(task.PermissionMode) == nil {
 		mode = permission.Mode(task.PermissionMode)
 	}
 	_ = sess.SetPermissionMode(string(mode))
@@ -577,8 +595,8 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeInvalidJSONBody(w, err)
 		return
 	}
-	if req.Name == "" || req.Cron == "" || req.Prompt == "" {
-		writeError(w, http.StatusBadRequest, "name, cron, and prompt are required")
+	if req.Name == "" || req.Cron == "" || req.Prompt == "" || req.PermissionMode == "" {
+		writeError(w, http.StatusBadRequest, "name, cron, prompt, and permission_mode are required")
 		return
 	}
 	if err := s.validateAgentID(req.AgentID); err != nil {
@@ -714,8 +732,7 @@ type patchTaskRequest struct {
 	Directory *string                  `json:"directory,omitempty"`
 	Notify    *scheduler.NotifyTargets `json:"notify,omitempty"`
 	Name      *string                  `json:"name,omitempty"`
-	// PermissionMode: "auto", "strict", or "" to clear back to the global
-	// default.
+	// PermissionMode: "auto" or "strict".
 	PermissionMode *string `json:"permission_mode,omitempty"`
 }
 
@@ -809,10 +826,10 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 // would hang (#2613).
 func validateTaskPermissionMode(mode string) error {
 	switch mode {
-	case "", string(permission.ModeAutoApprove), string(permission.ModeStrict):
+	case string(permission.ModeAutoApprove), string(permission.ModeStrict):
 		return nil
 	}
-	return fmt.Errorf("permission_mode must be auto or strict (or empty to follow the global default)")
+	return fmt.Errorf("permission_mode must be auto or strict")
 }
 
 func (s *Server) taskToResponse(t scheduler.Task) taskResponse {
