@@ -172,3 +172,22 @@ describe('terminal command copy button', () => {
     expect(get(toasts)[0].type).toBe('error')
   })
 })
+
+// The header count is derived from the result text, so a zero-hit grep's
+// "(no matches)" sentinel used to read as "1 matches" (#2612).
+describe('tool header count', () => {
+  const meta = (over: Record<string, unknown>) =>
+    render([tool(over)]).querySelector('.tool-submeta')?.textContent
+
+  it('shows 0 matches for a grep with no hits', () => {
+    expect(meta({ name: 'grep', args: { pattern: 'x' }, result: '(no matches)' })).toBe('0 matches')
+  })
+
+  it('uses the singular for one', () => {
+    expect(meta({ name: 'grep', args: { pattern: 'x' }, result: 'a.go:1:x' })).toBe('1 match')
+  })
+
+  it('keeps the plural for many', () => {
+    expect(meta({ name: 'read_file', args: { path: '/tmp/a' }, result: 'a\nb' })).toBe('2 lines')
+  })
+})
