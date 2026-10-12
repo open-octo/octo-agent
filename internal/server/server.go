@@ -1588,6 +1588,15 @@ func readBodyJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
+// readBodyJSONStrict is readBodyJSON that rejects fields v doesn't have, for
+// endpoints where a dropped field would otherwise read as applied.
+func readBodyJSONStrict(r *http.Request, v any) error {
+	defer r.Body.Close()
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
 // writeInvalidJSONBody writes the standard 400 response for a readBodyJSON
 // failure, including the decode error so callers can tell a body-shape
 // mismatch from a syntax error instead of guessing.

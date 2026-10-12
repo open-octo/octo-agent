@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -564,7 +563,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req taskRequest
-	if err := readBodyJSON(r, &req); err != nil {
+	if err := readBodyJSONStrict(r, &req); err != nil {
 		writeInvalidJSONBody(w, err)
 		return
 	}
@@ -718,14 +717,10 @@ func (s *Server) handlePatchTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing task id")
 		return
 	}
-	// Reject unknown fields instead of dropping them: a PATCH for a field the
-	// task doesn't have (e.g. permission_mode) would otherwise return 200 and
-	// read as applied (#2613).
+	// Strict: a field the task doesn't have (e.g. permission_mode) would
+	// otherwise return 200 and read as applied (#2613).
 	var req patchTaskRequest
-	defer r.Body.Close()
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := readBodyJSONStrict(r, &req); err != nil {
 		writeInvalidJSONBody(w, err)
 		return
 	}
