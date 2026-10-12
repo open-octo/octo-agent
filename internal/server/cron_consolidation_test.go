@@ -211,6 +211,54 @@ func TestPatchTask_RejectsEmptyName(t *testing.T) {
 	}
 }
 
+// TestTaskPermissionMode_CreatePatchValidate: permission_mode round-trips on
+// create and PATCH, "" clears it, and interactive is rejected — a run has
+// nobody to answer an ask (#2613).
+func TestTaskPermissionMode_CreatePatchValidate(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	post := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/tasks", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		return w.Code
+	}
+	if code := post(`{"name":"i","cron":"0 0 9 * * *","prompt":"go","permission_mode":"interactive"}`); code != http.StatusBadRequest {
+		t.Errorf("create with interactive: status = %d, want 400", code)
+	}
+
+	id := createTaskForTest(t, srv, `{"name":"s","cron":"0 0 9 * * *","prompt":"go","permission_mode":"strict"}`)
+	if got := listTasksForTest(t, srv)[0].PermissionMode; got != "strict" {
+		t.Fatalf("created permission_mode = %q, want strict", got)
+	}
+
+	patch := func(body string) (int, taskResponse) {
+		req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+id, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		serveLoopback(srv.mux, w, req)
+		var got taskResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &got)
+		return w.Code, got
+	}
+	if code, _ := patch(`{"permission_mode":"interactive"}`); code != http.StatusBadRequest {
+		t.Errorf("patch to interactive: status = %d, want 400", code)
+	}
+	if got := listTasksForTest(t, srv)[0].PermissionMode; got != "strict" {
+		t.Errorf("after rejected patch permission_mode = %q, want strict unchanged", got)
+	}
+	if code, got := patch(`{"permission_mode":"auto"}`); code != http.StatusOK || got.PermissionMode != "auto" {
+		t.Errorf("patch to auto: status %d, permission_mode %q", code, got.PermissionMode)
+	}
+	if code, got := patch(`{"permission_mode":""}`); code != http.StatusOK || got.PermissionMode != "" {
+		t.Errorf("patch to empty: status %d, permission_mode %q, want cleared", code, got.PermissionMode)
+	}
+}
+
 // TestDeleteTask_DeletesGroupKeepsSessions: deleting a task deletes its group,
 // but the group's member sessions stay on disk (they fall back to ungrouped).
 func TestDeleteTask_DeletesGroupKeepsSessions(t *testing.T) {

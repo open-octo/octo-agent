@@ -29,6 +29,7 @@ octo serve
 | `agent_id` | 否 | 运行时使用的专家 id；留空 = Default Agent |
 | `directory` | 否 | 运行时所在的工作目录 |
 | `notify` | 否 | 每次运行的最终回复（或失败信息）要推送到哪些 IM 会话 |
+| `permission_mode` | 否 | 运行中遇到需要审批的工具调用怎么处理：`auto` 直接放行，`strict` 直接拒绝。两种模式下 deny 规则都照样生效。不填就跟全局 `permission_mode` 走（全局是 `strict` 就用 `strict`，否则用 `auto`）。运行时没人在场，所以永远不会弹审批 |
 | `enabled` | 是 | 这个计划当前是否处于启用状态 |
 
 这个 prompt 是在自己独立的会话里跑的，拿不到创建这个任务的那个对话的任何上下文，所以它必须
@@ -107,7 +108,7 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` 接受 `name`、`enabled`、`cron`、`prompt`、`model`、`agent_id`、
-`directory`、`notify`——只发你要改的那部分就行；用 `name` 改名也会同步重命名任务的项目（目录不动）。Web UI 里的调度器面板就是这套 API 的一个
+`directory`、`notify`、`permission_mode`（传 `""` 清空，回到跟全局走）——只发你要改的那部分就行；用 `name` 改名也会同步重命名任务的项目（目录不动）。Web UI 里的调度器面板就是这套 API 的一个
 客户端，所以用 `curl` 创建的任务会出现在面板里，反过来也一样；面板也是**试跑一个新任务的
 `Run` 按钮**推荐用的地方，而不是从聊天会话里直接触发 `/api/tasks/{id}/run`——一次运行是在这
 个任务**自己的**会话里跑一整轮 agent（最多 30 分钟），从对话里触发只会把那个对话卡住，而真

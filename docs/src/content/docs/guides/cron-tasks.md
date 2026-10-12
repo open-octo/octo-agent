@@ -30,6 +30,7 @@ the server was down is not replayed on restart.
 | `agent_id` | no | Id of the expert the run executes as; empty = the Default Agent |
 | `directory` | no | Working directory the run executes in |
 | `notify` | no | IM chats to push each run's final reply (or failure) to |
+| `permission_mode` | no | How a run handles a tool call that would need approval: `auto` allows it, `strict` denies it. Deny rules apply either way. Empty follows the global `permission_mode` (`strict` if that is `strict`, otherwise `auto`) — a run never asks, since nobody is there to answer |
 | `enabled` | yes | Whether the schedule is currently active |
 
 The prompt runs in its own session with no access to whatever conversation created the task, so it
@@ -115,7 +116,7 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`, `agent_id`, `directory`,
-`notify` — send only what you're changing; renaming via `name` also renames the task's project (its
+`notify`, `permission_mode` (`""` clears it back to the global default) — send only what you're changing; renaming via `name` also renames the task's project (its
 directory stays put). The Web UI's scheduler panel is a client of this
 same API, so a task created by `curl` shows up there and vice versa; the panel is also the
 recommended place to **smoke-test a new task's `Run` button** rather than triggering

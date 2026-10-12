@@ -69,8 +69,7 @@ func TestCreateSession_SeedsWorkingDirFromTaskDirectory(t *testing.T) {
 
 // A cron tick has nobody present to answer an ask prompt, so a freshly
 // created task session must not inherit the web/CLI/IM interactive default —
-// write_file/edit_file no longer blanket-allow $CWD, and interactive's
-// implicit ask would time out to deny on every write.
+// an ask waits with no timeout, so the run would hang.
 func TestCreateSession_DefaultsToAutoPermissionModeWhenUnconfigured(t *testing.T) {
 	setTestHome(t)
 	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
@@ -108,6 +107,57 @@ func TestCreateSession_HonorsExplicitGlobalPermissionMode(t *testing.T) {
 	}
 	if sess.PermissionMode != "strict" {
 		t.Errorf("PermissionMode = %q, want %q", sess.PermissionMode, "strict")
+	}
+}
+
+// An explicit global interactive must not reach a run either — that was the
+// hang in #2613.
+func TestCreateSession_GlobalInteractiveBecomesAuto(t *testing.T) {
+	setTestHome(t)
+	if err := (config.Config{PermissionMode: "interactive"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	sessionID, err := srv.CreateSession(scheduler.Task{Name: "t"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess, err := agent.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if sess.PermissionMode != "auto" {
+		t.Errorf("PermissionMode = %q, want %q", sess.PermissionMode, "auto")
+	}
+}
+
+// A task's own permission_mode wins over the global default, either way.
+func TestCreateSession_TaskPermissionModeOverridesGlobal(t *testing.T) {
+	for _, tc := range []struct{ global, task, want string }{
+		{global: "", task: "strict", want: "strict"},
+		{global: "strict", task: "auto", want: "auto"},
+		// A hand-written tasks.json can carry anything; interactive must not
+		// slip through to a run.
+		{global: "", task: "interactive", want: "auto"},
+	} {
+		setTestHome(t)
+		if err := (config.Config{PermissionMode: tc.global}).Save(); err != nil {
+			t.Fatal(err)
+		}
+		srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+		sessionID, err := srv.CreateSession(scheduler.Task{Name: "t", PermissionMode: tc.task})
+		if err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		sess, err := agent.LoadSession(sessionID)
+		if err != nil {
+			t.Fatalf("LoadSession: %v", err)
+		}
+		if sess.PermissionMode != tc.want {
+			t.Errorf("global %q, task %q: PermissionMode = %q, want %q", tc.global, tc.task, sess.PermissionMode, tc.want)
+		}
 	}
 }
 

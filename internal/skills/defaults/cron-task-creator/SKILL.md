@@ -26,6 +26,7 @@ a run).
 | `agent_id` | no | Id of the expert (`/api/agents`) the run executes as; empty = the Default Agent |
 | `directory` | no | Working directory the run executes in |
 | `notify` | no | IM chats to push each run's final reply (or failure) to — see the notify table |
+| `permission_mode` | no | `auto` (tool calls that would need approval are allowed) or `strict` (they are denied); deny rules apply either way. Empty follows the global default. `interactive` is rejected — a run has nobody to answer an approval |
 | `enabled` | yes | Whether the schedule is active |
 
 `id`, `created_at`, `last_run`, `session_id`, `session_group_id` are
@@ -115,8 +116,9 @@ inline `octo-ui` fence — **no panel `id`** — holding, in this order:
 | `note` | `textarea`, `rows: 3` | empty; label along the lines of "Or describe the change and I'll make it" |
 
 followed by a primary `button` with `action: "save_task"` and
-`payload: {"id": "<id>"}`. Label fields in the user's language. `notify` and
-`agent_id` stay out of the form — changes to them go through `note`.
+`payload: {"id": "<id>"}`. Label fields in the user's language. `notify`,
+`agent_id` and `permission_mode` stay out of the form — changes to them go
+through `note`.
 
 The renderer silently truncates a prefilled value past its cap — **500**
 characters for an `input`, **5000** for a `textarea` — and whatever it shows
@@ -164,7 +166,8 @@ curl -s -X PATCH http://127.0.0.1:8088/api/tasks/{id} \
 ```
 
 `PATCH /api/tasks/{id}` accepts `name`, `enabled`, `cron`, `prompt`, `model`,
-`agent_id`, `directory`, `notify` — send only the fields you want to change.
+`agent_id`, `directory`, `notify`, `permission_mode` — send only the fields you
+want to change (`"permission_mode":""` clears it back to the global default).
 A changed `cron` is re-validated (syntax and the 1-hour floor) and rejected
 with a 400.
 Renaming via `name` also renames the task's session group. Look up `{id}` from
