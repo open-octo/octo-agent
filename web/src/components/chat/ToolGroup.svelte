@@ -273,7 +273,9 @@
         const provider = searchProvider(tool)
         return provider ? `${r.length} results · ${provider}` : `${r.length} results`
       }
-      case 'grep':       return res ? `${nonEmptyLines(res)} matches` : ''
+      // A zero-hit grep returns the "(no matches)" sentinel, which would
+      // otherwise count as one line.
+      case 'grep':       return res === '(no matches)' ? '0 matches' : res ? `${nonEmptyLines(res)} matches` : ''
       case 'read_file':  return res ? `${nonEmptyLines(res)} lines` : ''
       case 'bash': case 'terminal': {
         const out = (tool.stdout && tool.stdout.length) ? tool.stdout.join('\n') : res
