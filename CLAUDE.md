@@ -40,6 +40,7 @@ Five-layer stack with one-directional dependencies:
 4. **Providers (`internal/provider/`)** — per-vendor wire-format adapters. `provider.go` defines the interfaces; each subdirectory implements one protocol:
    - `anthropic/` — Messages API. `x-api-key` + `anthropic-version` headers. `system` as top-level field. Content blocks `[{type:"text", text}]`. SSE aggregator dispatches on `message_start`/`content_block_delta`/`message_delta`. Tool calls land as `content_block_start` of type `tool_use` with subsequent `input_json_delta` deltas.
    - `openai/` — Chat Completions. `Authorization: Bearer`. `system` carried as `messages[0]`. SSE aggregator parses `chat.completion.chunk`; tolerates missing `[DONE]` sentinel (some third-party servers omit it). Tool calls arrive in `delta.tool_calls[]` with chunked JSON arguments.
+   - `responses/` — OpenAI Responses API (`/v1/responses`), offered as the Custom vendor's `openai-responses` protocol. Always stateless (`store:false`): system prompt in `instructions`, flat function tools sent with `strict:false`, tool calls/outputs as standalone input items. Reasoning items come back as `thinking` blocks carrying the item `ID`, `encrypted_content` in `Signature`, and the producing `Model`; they are replayed only to that same model, and the anthropic adapter drops any thinking block with an `ID`.
 
    Provider wire quirks are encapsulated here — the agent layer never branches on protocol.
 

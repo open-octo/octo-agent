@@ -201,3 +201,26 @@ func TestSendStream_ReasoningOff_WireBody(t *testing.T) {
 		})
 	}
 }
+
+// A thinking block with an ID is an OpenAI Responses reasoning item left in
+// history by another endpoint; its signature would be rejected, so it is
+// dropped while a native thinking block is kept.
+func TestMarshalBlocks_DropsResponsesReasoningItem(t *testing.T) {
+	foreign := agent.NewThinkingBlock("", "openai-encrypted")
+	foreign.ID = "rs_1"
+	foreign.Model = "gpt-6-luna"
+	out, err := marshalBlocks([]agent.ContentBlock{
+		foreign,
+		agent.NewThinkingBlock("native", "sig"),
+		agent.NewToolUseBlock("call_1", "x", nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("blocks = %v, want native thinking + tool_use", out)
+	}
+	if out[0]["type"] != "thinking" || out[0]["signature"] != "sig" {
+		t.Errorf("out[0] = %v", out[0])
+	}
+}

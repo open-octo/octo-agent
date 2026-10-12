@@ -409,6 +409,7 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 			items := []selectItem{
 				{label: "OpenAI (Chat Completions)", desc: "openai", value: "openai"},
 				{label: "Anthropic (Messages)", desc: "anthropic", value: "anthropic"},
+				{label: "OpenAI (Responses)", desc: "openai-responses", value: "openai-responses"},
 			}
 			choice, ok := runSelect(stdin, stdout, "Protocol", items, def)
 			if !ok {
@@ -418,9 +419,9 @@ func runConfigWizard(stdin io.Reader, stdout, stderr io.Writer, firstRun bool) i
 			fmt.Fprintf(stdout, "Protocol: %s\n\n", protocol)
 		} else {
 			protocol = strings.ToLower(strings.TrimSpace(promptDefault(reader, stdout,
-				"Protocol (openai | anthropic)", def)))
-			if protocol != "openai" && protocol != "anthropic" {
-				fmt.Fprintf(stderr, "octo config: protocol must be \"openai\" or \"anthropic\"\n")
+				"Protocol (openai | anthropic | openai-responses)", def)))
+			if protocol != "openai" && protocol != "anthropic" && protocol != "openai-responses" {
+				fmt.Fprintf(stderr, "octo config: protocol must be \"openai\", \"anthropic\" or \"openai-responses\"\n")
 				return 2
 			}
 		}

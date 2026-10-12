@@ -307,8 +307,9 @@ var Registry = []Vendor{
 		ID:          ProviderCustom,
 		DisplayName: "Custom",
 		// Protocol is empty: a Custom endpoint has no fixed wire format, so the
-		// user picks "anthropic" or "openai" at config time and it is stored on
-		// the model entry (config.ModelEntry.Protocol), not here.
+		// user picks "anthropic", "openai" or "openai-responses" at config time
+		// and it is stored on the model entry (config.ModelEntry.Protocol), not
+		// here.
 		Protocol:       "",
 		API:            "",
 		APIKeyEnvVar:   "CUSTOM_API_KEY",
@@ -333,7 +334,8 @@ func VendorCustomEndpoint(id string) bool {
 }
 
 // VendorNeedsProtocol reports whether the vendor has no fixed wire protocol, so
-// the caller must supply one ("anthropic" or "openai") from the model entry.
+// the caller must supply one ("anthropic", "openai" or "openai-responses") from
+// the model entry.
 // Only the Custom catch-all needs this; every named vendor pins its protocol.
 func VendorNeedsProtocol(id string) bool {
 	if v := vendorByID(id); v != nil {

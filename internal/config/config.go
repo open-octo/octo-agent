@@ -51,8 +51,9 @@ type ModelEntry struct {
 	// ContextWindow is the actual deployment limit for this endpoint/model
 	// pair, in tokens. Zero leaves resolution to the built-in model table.
 	ContextWindow int `yaml:"context_window,omitempty"`
-	// Protocol ("anthropic" | "openai") is the wire format for the Custom
-	// vendor, which has no registry-pinned protocol. Ignored for named vendors.
+	// Protocol ("anthropic" | "openai" | "openai-responses") is the wire format
+	// for the Custom vendor, which has no registry-pinned protocol. Ignored for
+	// named vendors.
 	Protocol string `yaml:"protocol,omitempty"`
 	// BaseURL is an optional endpoint override; empty uses the vendor default.
 	BaseURL string `yaml:"base_url,omitempty"`
@@ -127,8 +128,8 @@ type Endpoint struct {
 	// APIKey is a plaintext fallback used only if the provider's env var is
 	// empty. Stored mode 0600. Prefer the env var.
 	APIKey string `yaml:"api_key,omitempty"`
-	// Protocol is the wire format ("anthropic" | "openai"). Only the
-	// "custom" vendor needs it set explicitly; named vendors pin it.
+	// Protocol is the wire format ("anthropic" | "openai" | "openai-responses").
+	// Only the "custom" vendor needs it set explicitly; named vendors pin it.
 	Protocol string `yaml:"protocol,omitempty"`
 	// Headers are extra HTTP headers sent with every request to this
 	// endpoint's BaseURL. Applied after the client's built-in headers

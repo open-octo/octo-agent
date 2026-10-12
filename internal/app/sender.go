@@ -22,6 +22,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/provider/anthropic"
 	"github.com/open-octo/octo-agent/internal/provider/openai"
 	"github.com/open-octo/octo-agent/internal/provider/ratelimit"
+	"github.com/open-octo/octo-agent/internal/provider/responses"
 )
 
 // Provider name constants (legacy).  New code should use vendor IDs directly.
@@ -37,8 +38,9 @@ type SenderOptions struct {
 	Provider string // vendor ID, e.g. "kimi", "deepseek", "anthropic", "openai"
 	APIKey   string
 	BaseURL  string // optional endpoint override; empty uses the vendor default
-	// Protocol ("anthropic" | "openai") is required only for the Custom vendor,
-	// which has no registry-pinned wire format; named vendors ignore it.
+	// Protocol ("anthropic" | "openai" | "openai-responses") is required only
+	// for the Custom vendor, which has no registry-pinned wire format; named
+	// vendors ignore it.
 	Protocol string
 	// Headers are extra HTTP headers sent with every request to this
 	// endpoint's BaseURL, forwarded from config.Endpoint/ModelEntry.Headers.
@@ -204,7 +206,7 @@ func buildClient(name, apiKey, baseURL, protocol string, headers map[string]stri
 		proto = protocol
 	}
 	if proto == "" {
-		return nil, fmt.Errorf("provider %q requires a protocol (\"anthropic\" or \"openai\")", name)
+		return nil, fmt.Errorf("provider %q requires a protocol (\"anthropic\", \"openai\" or \"openai-responses\")", name)
 	}
 	// The key-required policy lives here, not in the wire clients: the same
 	// openai client serves api.openai.com (key mandatory) and a keyless local
@@ -238,6 +240,17 @@ func buildClient(name, apiKey, baseURL, protocol string, headers map[string]stri
 		// vendor-specific quirks (DeepSeek's thinking-mode toggle); names the
 		// client doesn't recognise leave the request in its generic shape.
 		client.Dialect = name
+		client.Headers = headers
+		client.Limiter = limiter
+		return client, nil
+	case "openai-responses":
+		client, err := responses.New(apiKey)
+		if err != nil {
+			return nil, err
+		}
+		if baseURL != "" {
+			client.BaseURL = baseURL
+		}
 		client.Headers = headers
 		client.Limiter = limiter
 		return client, nil

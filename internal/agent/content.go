@@ -27,7 +27,8 @@ type ContentBlock struct {
 
 	// ID is the unique call identifier supplied by the model (type=="tool_use").
 	// ToolUseID on a tool_result block must match the ID of the corresponding
-	// tool_use block.
+	// tool_use block. On a "thinking" block it is the OpenAI Responses reasoning
+	// item id; Anthropic thinking blocks never carry one.
 	ID string `json:"id,omitempty"`
 
 	// Name is the tool name the model wants to invoke (type=="tool_use").
@@ -75,6 +76,12 @@ type ContentBlock struct {
 	// Signature authenticates a thinking block (type=="thinking"). It must be
 	// sent back verbatim alongside the thinking text on the next request.
 	Signature string `json:"signature,omitempty"`
+
+	// Model names the model that produced an opaque reasoning item
+	// (type=="thinking" with ID set — an OpenAI Responses reasoning item, whose
+	// encrypted Signature only that model can decode). Adapters replay such a
+	// block only to the same model and drop it otherwise.
+	Model string `json:"model,omitempty"`
 
 	// Reasoning carries an OpenAI-protocol thinking model's reasoning trace that
 	// must be echoed back on the next request (type=="tool_use"). deepseek-v4

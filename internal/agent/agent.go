@@ -598,7 +598,7 @@ func UserFacingError(err error) string {
 // knownProviderPrefixes are the provider names used as error-message prefixes
 // in internal/provider/*. Adding a new provider should add its name here so
 // its error messages are user-friendly.
-var knownProviderPrefixes = []string{"anthropic", "openai"}
+var knownProviderPrefixes = []string{"anthropic", "openai", "responses"}
 
 // stripProviderPrefix removes a leading "<provider>: " from msg if the
 // provider is in knownProviderPrefixes.

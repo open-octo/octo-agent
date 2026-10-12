@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,5 +67,30 @@ func TestTestConnection_CustomKeyless_AnthropicProtocol(t *testing.T) {
 	}
 	if sawKey {
 		t.Error("x-api-key header sent for a keyless custom endpoint")
+	}
+}
+
+// The connection test asks for one output token; on the Responses protocol
+// that must be raised to the API's floor of 16 or the test itself 400s.
+func TestTestConnection_CustomResponsesProtocol(t *testing.T) {
+	var path, auth string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, auth = r.URL.Path, r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"model":"m","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"!"}]}]}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := TestConnection(ctx, ProviderCustom, "k", srv.URL+"/v1", "m", "openai-responses"); err != nil {
+		t.Fatalf("TestConnection (openai-responses): %v", err)
+	}
+	if path != "/v1/responses" || auth != "Bearer k" {
+		t.Errorf("path = %q, auth = %q", path, auth)
+	}
+	if n, _ := body["max_output_tokens"].(float64); n < 16 {
+		t.Errorf("max_output_tokens = %v, want >= 16", body["max_output_tokens"])
 	}
 }

@@ -598,7 +598,12 @@ func marshalBlocks(blocks []agent.ContentBlock) ([]map[string]any, error) {
 			})
 		case "thinking":
 			// Replayed verbatim with its signature; required before tool_use
-			// when thinking is enabled, or the API rejects the request.
+			// when thinking is enabled, or the API rejects the request. A block
+			// with an ID is an OpenAI Responses reasoning item left in history
+			// by an earlier endpoint; its signature is not Anthropic's, so drop it.
+			if b.ID != "" {
+				break
+			}
 			out = append(out, map[string]any{
 				"type":      "thinking",
 				"thinking":  b.Thinking,
