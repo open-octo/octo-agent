@@ -36,6 +36,7 @@
   let fProtocol = $state<api.Protocol>('openai')
   let fModel    = $state('')  // create only: optional first model
   let fVision   = $state(true)
+  let fWin      = $state('')  // create + Custom only: first model's context window
   // Raw JSON text for the custom-headers textarea; parsed on submit. Unlike
   // fApiKey, this is pre-filled on edit (headers aren't masked like the API
   // key — see design doc "兼容性" for the tradeoff).
@@ -347,6 +348,7 @@
     fApiKey = ''
     fProtocol = 'openai'
     fHeadersText = ''
+    fWin = ''
     fIdTouched = false
     applyProviderPreset()
     view = 'form'
@@ -400,6 +402,15 @@
       }
     }
 
+    // Same reasoning as headers: a bad window blocks the save. Named vendors
+    // never show the field, so a value typed under Custom before switching
+    // vendor is ignored rather than validated.
+    const win = !editing && isCustom ? parseContextWindow(fWin) : 0
+    if (win === null) {
+      showToast(tr('settings.endpoints.context_window.invalid'), 'error')
+      return
+    }
+
     busy = true
     try {
       if (!editing) {
@@ -412,7 +423,7 @@
           api_key: fApiKey || undefined,
           protocol: isCustom ? fProtocol : undefined,
           headers: parsedHeaders,
-          models: model ? [{ model, vision: fVision }] : [],
+          models: model ? [{ model, vision: fVision, context_window: win || undefined }] : [],
         })
         // First usable endpoint on a config with no default yet — point the
         // default at it so the save is immediately effective. Non-fatal: the
@@ -565,6 +576,18 @@
           <span>{$t('settings.endpoints.models.vision')}</span>
         </label>
       </div>
+      {#if isCustom}
+        <label class="field">
+          <span class="field-label">{$t('settings.endpoints.context_window')}</span>
+          <input
+            class="field-input mono"
+            type="text"
+            placeholder={$t('settings.endpoints.context_window.placeholder')}
+            bind:value={fWin}
+            disabled={busy}
+          />
+        </label>
+      {/if}
     {/if}
 
     <div class="form-actions">
