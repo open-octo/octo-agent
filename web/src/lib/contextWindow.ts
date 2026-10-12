@@ -17,11 +17,11 @@ export function parseContextWindow(input: string): number | null {
 }
 
 // formatContextWindow renders a token count in the same shorthand, exactly:
-// a value that isn't a whole number of k or M is shown as-is so editing it
-// round-trips without loss.
+// a value that isn't a whole number of k or M (or tenths of M, so 1.5M reads
+// the way it was typed) is shown as-is so editing it round-trips without loss.
 export function formatContextWindow(n: number): string {
   if (n <= 0) return ''
-  if (n % 1_000_000 === 0) return `${n / 1_000_000}M`
+  if (n >= 1_000_000 && n % 100_000 === 0) return `${n / 1_000_000}M`
   if (n % 1000 === 0) return `${n / 1000}K`
   return String(n)
 }

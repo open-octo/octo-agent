@@ -695,10 +695,10 @@
                       disabled={busy}
                     />
                   </label>
-                  <button class="add-ok" onclick={() => submitEditWindow(ep, m)} disabled={busy}>
+                  <button class="add-ok" title={$t('common.save')} onclick={() => submitEditWindow(ep, m)} disabled={busy}>
                     <iconify-icon icon="ant-design:check-outlined" width="13"></iconify-icon>
                   </button>
-                  <button class="add-cancel" onclick={() => (editingWin = null)} disabled={busy}>
+                  <button class="add-cancel" title={$t('common.cancel')} onclick={() => (editingWin = null)} disabled={busy}>
                     <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
                   </button>
                 </div>
@@ -743,10 +743,10 @@
                   <input type="checkbox" bind:checked={newModelVision} disabled={busy} />
                   <span>{$t('settings.endpoints.models.vision')}</span>
                 </label>
-                <button class="add-ok" onclick={() => submitAddModel(ep)} disabled={busy || !newModel.trim()}>
+                <button class="add-ok" title={$t('common.save')} onclick={() => submitAddModel(ep)} disabled={busy || !newModel.trim()}>
                   <iconify-icon icon="ant-design:check-outlined" width="13"></iconify-icon>
                 </button>
-                <button class="add-cancel" onclick={() => (addingFor = null)} disabled={busy}>
+                <button class="add-cancel" title={$t('common.cancel')} onclick={() => (addingFor = null)} disabled={busy}>
                   <iconify-icon icon="ant-design:close-outlined" width="13"></iconify-icon>
                 </button>
               </div>

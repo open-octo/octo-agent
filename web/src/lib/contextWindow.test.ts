@@ -27,6 +27,7 @@ describe('formatContextWindow', () => {
   it('uses shorthand only when exact', () => {
     expect(formatContextWindow(1_000_000)).toBe('1M')
     expect(formatContextWindow(200_000)).toBe('200K')
+    expect(formatContextWindow(1_500_000)).toBe('1.5M')
     expect(formatContextWindow(131072)).toBe('131072')
     expect(formatContextWindow(0)).toBe('')
   })
