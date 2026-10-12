@@ -263,6 +263,9 @@
   function nonEmptyLines(s: string): number {
     return s ? s.split('\n').filter(l => l.trim() !== '').length : 0
   }
+  function count(n: number, one: string, many: string): string {
+    return `${n} ${n === 1 ? one : many}`
+  }
   function toolMeta(tool: any): string {
     if (!tool.done || tool.error) return ''
     const res = typeof tool.result === 'string' ? tool.result : ''
@@ -271,26 +274,26 @@
         const r = searchResults(tool)
         if (!r) return ''
         const provider = searchProvider(tool)
-        return provider ? `${r.length} results · ${provider}` : `${r.length} results`
+        return provider ? `${count(r.length, 'result', 'results')} · ${provider}` : count(r.length, 'result', 'results')
       }
       // A zero-hit grep returns the "(no matches)" sentinel, which would
       // otherwise count as one line.
-      case 'grep':       return res === '(no matches)' ? '0 matches' : res ? `${nonEmptyLines(res)} matches` : ''
-      case 'read_file':  return res ? `${nonEmptyLines(res)} lines` : ''
+      case 'grep':       return res === '(no matches)' ? '0 matches' : res ? count(nonEmptyLines(res), 'match', 'matches') : ''
+      case 'read_file':  return res ? count(nonEmptyLines(res), 'line', 'lines') : ''
       case 'bash': case 'terminal': {
         const out = (tool.stdout && tool.stdout.length) ? tool.stdout.join('\n') : res
-        return out ? `${nonEmptyLines(out)} lines` : ''
+        return out ? count(nonEmptyLines(out), 'line', 'lines') : ''
       }
       case 'edit_file': {
         const diff = tool.ui_payload?.diff
         if (!diff) return ''
         const changes = diff.split('\n').filter((l: string) => l.startsWith('+') || l.startsWith('-')).length
-        return changes ? `${changes} changes` : ''
+        return changes ? count(changes, 'change', 'changes') : ''
       }
       case 'write_file': {
         const p = tool.ui_payload
         if (!p) return ''
-        const lines = p.line_count ? `${p.line_count} lines` : ''
+        const lines = p.line_count ? count(p.line_count, 'line', 'lines') : ''
         const b = p.size_bytes ?? 0
         const bytes = b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} KB`
         return [lines, bytes].filter(Boolean).join(' · ')
