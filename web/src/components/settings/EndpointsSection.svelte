@@ -239,7 +239,7 @@
   let fetchSeq = 0
 
   function canFetchModels(ep: EndpointConfig): boolean {
-    return ep.provider === 'custom' && ep.protocol === 'openai'
+    return ep.provider === 'custom' && (ep.protocol === 'openai' || ep.protocol === 'openai-responses')
   }
 
   async function openFetchModels(ep: EndpointConfig) {

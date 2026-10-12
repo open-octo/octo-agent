@@ -47,6 +47,7 @@ func TestListRemoteModels_UsesStoredConnection(t *testing.T) {
 			{ID: "relay", Provider: "custom", BaseURL: upstream.URL + "/v1", Protocol: "openai", APIKey: "sk-stored", Models: []config.EndpointModel{{Model: "a-model"}}},
 			{ID: "wrong-key", Provider: "custom", BaseURL: upstream.URL, Protocol: "openai", APIKey: "sk-other", Models: []config.EndpointModel{{Model: "x"}}},
 			{ID: "anth", Provider: "custom", BaseURL: upstream.URL, Protocol: "anthropic", APIKey: "sk-stored", Models: []config.EndpointModel{{Model: "y"}}},
+			{ID: "resp", Provider: "custom", BaseURL: upstream.URL + "/v1", Protocol: "openai-responses", APIKey: "sk-stored", Models: []config.EndpointModel{{Model: "z"}}},
 		},
 		Default: "relay::a-model",
 	})
@@ -58,6 +59,12 @@ func TestListRemoteModels_UsesStoredConnection(t *testing.T) {
 	}
 	if want := []string{"a-model", "b-model"}; !reflect.DeepEqual(got.Models, want) {
 		t.Fatalf("relay models = %v, want %v", got.Models, want)
+	}
+
+	// A Responses endpoint lists through the same GET /v1/models.
+	code, got = getRemoteModels(t, srv, "resp")
+	if code != http.StatusOK || !got.OK || !reflect.DeepEqual(got.Models, []string{"a-model", "b-model"}) {
+		t.Fatalf("responses protocol: code=%d resp=%+v, want the listed models", code, got)
 	}
 
 	code, got = getRemoteModels(t, srv, "wrong-key")

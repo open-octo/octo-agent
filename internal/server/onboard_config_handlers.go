@@ -1227,8 +1227,8 @@ func (s *Server) handleListRemoteModels(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Named vendors keep their curated lists; Anthropic-protocol endpoints have
-	// no common listing call.
-	if ep.Provider != app.ProviderCustom || ep.Protocol != "openai" {
+	// no common listing call. Responses endpoints share OpenAI's /v1/models.
+	if ep.Provider != app.ProviderCustom || (ep.Protocol != "openai" && ep.Protocol != "openai-responses") {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "fetching models is only supported for custom OpenAI-compatible endpoints"})
 		return
 	}

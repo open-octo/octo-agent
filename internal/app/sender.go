@@ -485,6 +485,11 @@ var ErrModelListingUnsupported = errors.New("this endpoint does not support list
 // the OpenAI protocol). The result carries ids only — no context window or
 // vision flag — so callers must not treat it as a ready model configuration.
 func ListModels(ctx context.Context, providerName, apiKey, baseURL, protocol string, headers map[string]string) ([]string, error) {
+	// A Responses endpoint lists models with the same GET /v1/models as Chat
+	// Completions, so the openai client's listing serves both.
+	if protocol == "openai-responses" {
+		protocol = "openai"
+	}
 	p, err := buildClient(providerName, apiKey, baseURL, protocol, headers, nil)
 	if err != nil {
 		return nil, err
