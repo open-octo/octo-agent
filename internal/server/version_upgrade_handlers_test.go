@@ -468,6 +468,64 @@ func TestVersionCheckEndpoint_BypassesCache(t *testing.T) {
 	}
 }
 
+// TestVersionCheckEndpoint_ClientGoneStillCompletes: a client that leaves
+// mid-check must not turn the lookup into a recorded failure, which would back
+// off every other reader's refresh.
+func TestVersionCheckEndpoint_ClientGoneStillCompletes(t *testing.T) {
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/api/version/check", nil).WithContext(ctx)
+	serveLoopback(srv.mux, httptest.NewRecorder(), req)
+
+	srv.versionCacheMu.RLock()
+	failedAt, latest := srv.versionFailedAt, srv.versionLatest
+	srv.versionCacheMu.RUnlock()
+	if !failedAt.IsZero() {
+		t.Error("a cancelled request recorded a lookup failure")
+	}
+	if latest != "9.9.9" {
+		t.Errorf("cache after cancelled request = %q, want 9.9.9", latest)
+	}
+}
+
+// TestVersionCheckEndpoint_LookupFailureIsBadGateway: a failed lookup is an
+// error, never a 200 the button would read as "up to date".
+func TestVersionCheckEndpoint_LookupFailureIsBadGateway(t *testing.T) {
+	fakeFail := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(fakeFail.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fakeFail.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/version/check", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("failed lookup: got %d, want 502", w.Code)
+	}
+}
+
 // TestVersionCheckEndpoint_DisabledIsConflict: a no-lookup server must not
 // answer the button with a confident "up to date".
 func TestVersionCheckEndpoint_DisabledIsConflict(t *testing.T) {

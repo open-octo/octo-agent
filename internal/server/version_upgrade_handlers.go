@@ -299,8 +299,15 @@ func (s *Server) checkAndStore(ctx context.Context, current string) (string, boo
 // refreshes every versionRefreshInterval, so a release published since the
 // last refresh stayed invisible to a user who explicitly asked. The result
 // seeds that cache, so the button's follow-up GET and the badge agree.
+//
+// It deliberately ignores the `update_check` preference, as the tray's manual
+// check does: that switch promises no request octo makes unasked, and a click
+// is asking.
 func (s *Server) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), versionCheckTimeout)
+	// Detached from the request for the reason startVersionRefresh gives: a
+	// client leaving mid-check would record a failure and back off every other
+	// reader's refresh.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), versionCheckTimeout)
 	defer cancel()
 	latest, needs, err := s.RefreshLatestVersion(ctx)
 	if errors.Is(err, errUpdateCheckDisabled) {
@@ -308,7 +315,7 @@ func (s *Server) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "update check failed: "+err.Error())
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"latest": latest, "needs_update": needs})
