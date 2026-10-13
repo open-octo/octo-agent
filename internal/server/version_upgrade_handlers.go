@@ -18,10 +18,12 @@ import (
 // Version-cache timings.
 //
 // versionRefreshInterval is how often a lookup may actually leave the machine.
-// It is deliberately far longer than how often the UI reads the answer: reads
-// are served from cache and cost nothing, so the tray and the web badge can
-// both re-read every minute (which is what keeps them showing the same thing)
-// while the network is touched four times a day.
+// It is deliberately longer than how often the UI reads the answer: reads are
+// served from cache and cost nothing, so the tray and the web badge can both
+// re-read every minute (which is what keeps them showing the same thing) while
+// the network is touched at most every ten minutes. It must stay above that
+// one-minute read cadence, or every read would find the cache stale and look
+// up. Ten minutes rather than hours so a new release shows up the same session.
 //
 // versionCheckBackoff holds off retrying after a failure.
 //
@@ -35,7 +37,7 @@ import (
 // project's own mirror; the remaining public proxies are best-effort and not
 // budgeted for. Nothing waits on this: the lookup runs on its own goroutine.
 const (
-	versionRefreshInterval = 6 * time.Hour
+	versionRefreshInterval = 10 * time.Minute
 	versionCheckBackoff    = 10 * time.Minute
 	versionCheckTimeout    = 10 * time.Second
 )
@@ -218,7 +220,7 @@ func (s *Server) startVersionRefresh() {
 	// Without this, every reader polling while a refresh is in flight had a
 	// window in which it started a redundant second lookup — one extra
 	// request to GitHub for an answer already cached, on the one path that
-	// promises to leave the machine four times a day.
+	// promises to leave the machine at most once per refresh interval.
 	if _, _, stale := s.versionSnapshot(current); !stale {
 		s.versionChecking.Store(false)
 		return

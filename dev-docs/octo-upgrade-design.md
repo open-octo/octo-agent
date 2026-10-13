@@ -148,7 +148,7 @@ date"), 1 failure, 2 flag errors.
   That split is what keeps the tray item and the web badge in agreement:
   reads are free, so both re-read on a short cadence (a minute) and always
   display the same cached answer, while the network is touched at most once
-  per `versionRefreshInterval` (6h). A failed lookup keeps the last release
+  per `versionRefreshInterval` (10 min). A failed lookup keeps the last release
   actually seen rather than reporting current-is-latest — the two surfaces
   used to disagree precisely because one latched and the other didn't.
 
