@@ -292,6 +292,28 @@ func (s *Server) checkAndStore(ctx context.Context, current string) (string, boo
 	return latest, upgrade.NeedsUpdate(current, latest), nil
 }
 
+// ─── POST /api/version/check ────────────────────────────────────────────────
+
+// handleVersionCheck is the Settings "Check for updates" button: a forced
+// lookup, like the desktop tray's. GET /api/version answers from a cache that
+// refreshes every versionRefreshInterval, so a release published since the
+// last refresh stayed invisible to a user who explicitly asked. The result
+// seeds that cache, so the button's follow-up GET and the badge agree.
+func (s *Server) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), versionCheckTimeout)
+	defer cancel()
+	latest, needs, err := s.RefreshLatestVersion(ctx)
+	if errors.Is(err, errUpdateCheckDisabled) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "update check failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"latest": latest, "needs_update": needs})
+}
+
 // ─── POST /api/version/upgrade ──────────────────────────────────────────────
 
 // handleVersionUpgrade starts a binary upgrade in the background,

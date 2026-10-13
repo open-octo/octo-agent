@@ -1069,6 +1069,7 @@ func (s *Server) registerRoutes() {
 	s.api("DELETE /api/memories/{filename}", s.handleDeleteMemory)
 
 	// Version & restart
+	s.api("POST /api/version/check", s.handleVersionCheck)
 	s.api("POST /api/version/upgrade", s.handleVersionUpgrade)
 	s.api("POST /api/restart", s.handleRestart)
 

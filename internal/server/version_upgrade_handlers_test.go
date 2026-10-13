@@ -418,6 +418,68 @@ func TestRefreshLatestVersion_DisabledReportsError(t *testing.T) {
 	}
 }
 
+// TestVersionCheckEndpoint_BypassesCache: the Settings button's POST
+// /api/version/check must find a release the cached GET would still hide, and
+// leave the cache holding it so the follow-up GET agrees.
+func TestVersionCheckEndpoint_BypassesCache(t *testing.T) {
+	tag := "9.9.9"
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, fake.URL+"/releases/tag/v"+tag, http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	srv.LatestVersion()
+	if latest, _ := awaitVersion(t, srv, "9.9.9"); latest != "9.9.9" {
+		t.Fatalf("priming read = %q, want 9.9.9", latest)
+	}
+	settleVersionRefresh(t, srv)
+
+	tag = "10.0.0"
+	req := httptest.NewRequest(http.MethodPost, "/api/version/check", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/version/check: got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	var body struct {
+		Latest      string `json:"latest"`
+		NeedsUpdate bool   `json:"needs_update"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Latest != "10.0.0" || !body.NeedsUpdate {
+		t.Errorf("check = (%q, %v), want (10.0.0, true)", body.Latest, body.NeedsUpdate)
+	}
+	if latest, _ := srv.LatestVersion(); latest != "10.0.0" {
+		t.Errorf("cached read after check = %q, want 10.0.0", latest)
+	}
+}
+
+// TestVersionCheckEndpoint_DisabledIsConflict: a no-lookup server must not
+// answer the button with a confident "up to date".
+func TestVersionCheckEndpoint_DisabledIsConflict(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: false})
+	req := httptest.NewRequest(http.MethodPost, "/api/version/check", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("disabled check: got %d, want 409", w.Code)
+	}
+}
+
 // TestLatestVersion_ExportedMatchesBadge: the tray reads LatestVersion, the
 // badge reads the same cache through /api/version. They must never disagree.
 func TestLatestVersion_ExportedMatchesBadge(t *testing.T) {

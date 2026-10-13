@@ -1314,6 +1314,12 @@ export async function getVersion(): Promise<unknown> {
   return request<unknown>('/api/version', { cache: 'no-store' })
 }
 
+// Forces a live release lookup (GET /api/version only reads the server's cache)
+// and seeds that cache, so a getVersion() right after sees the fresh answer.
+export async function checkVersion(): Promise<{ latest: string; needs_update: boolean }> {
+  return request('/api/version/check', { method: 'POST' })
+}
+
 // Managed tunnel (mobile pairing)
 
 export interface TunnelPairing {

@@ -326,6 +326,12 @@
     if (checkingUpdate) return
     checkingUpdate = true
     try {
+      try {
+        await api.checkVersion()
+      } catch (e: any) {
+        showToast($t('settings.update.check_failed').replace('{err}', e?.message ?? ''), 'error')
+        return
+      }
       await loadVersion()
       if (!updateAvail) {
         showToast($t('settings.update.uptodate'), 'success')
