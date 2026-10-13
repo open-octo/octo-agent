@@ -156,9 +156,12 @@ func (s *Server) updateCheckAllowed() bool {
 // RefreshLatestVersion performs the lookup on THIS goroutine, ignoring the
 // refresh interval and the failure backoff, and seeds the shared cache with
 // the result so every other surface agrees on its next read. The desktop
-// tray's explicit "Check for updates…" calls this: the user asking is not a
-// request to be served a cached answer, and the tray can afford to block
-// where an HTTP handler cannot.
+// tray's explicit "Check for updates…" and the Settings button (POST
+// /api/version/check) call this: the user asking is not a request to be
+// served a cached answer.
+//
+// The lookup carries its own versionCheckTimeout; ctx only cancels. Waiting
+// for an in-flight refresh is bounded by that refresh's own timeout.
 //
 // Config.UpdateCheck still gates it — a build that never looks (the test
 // suite, every non-serve constructor) must not be talked into looking.
@@ -253,9 +256,13 @@ func (s *Server) awaitVersionRefresh(ctx context.Context) {
 	}
 }
 
-// runVersionCheck is the forced path: it waits for an in-flight background
-// refresh rather than racing it, then performs its own lookup.
+// runVersionCheck is the forced path: it waits for an in-flight refresh
+// rather than racing it. If a lookup succeeded after this check was asked for,
+// its answer is the one a new lookup would find, so it is returned as is —
+// which also collapses repeated clicks into one request. Otherwise it performs
+// its own lookup on a fresh budget, so time spent waiting can't starve it.
 func (s *Server) runVersionCheck(ctx context.Context, current string) (string, bool, error) {
+	asked := time.Now()
 	for !s.versionChecking.CompareAndSwap(false, true) {
 		select {
 		case <-ctx.Done():
@@ -265,7 +272,17 @@ func (s *Server) runVersionCheck(ctx context.Context, current string) (string, b
 		}
 	}
 	defer s.versionChecking.Store(false)
-	return s.checkAndStore(ctx, current)
+
+	s.versionCacheMu.RLock()
+	landed, known := s.versionCheckedAt.After(asked), s.versionLatest
+	s.versionCacheMu.RUnlock()
+	if landed {
+		return known, upgrade.NeedsUpdate(current, known), nil
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, versionCheckTimeout)
+	defer cancel()
+	return s.checkAndStore(lookupCtx, current)
 }
 
 // checkAndStore performs the lookup and records the outcome. The network call
@@ -309,9 +326,7 @@ func (s *Server) handleVersionCheck(w http.ResponseWriter, r *http.Request) {
 	// Detached from the request for the reason startVersionRefresh gives: a
 	// client leaving mid-check would record a failure and back off every other
 	// reader's refresh.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), versionCheckTimeout)
-	defer cancel()
-	latest, needs, err := s.RefreshLatestVersion(ctx)
+	latest, needs, err := s.RefreshLatestVersion(context.WithoutCancel(r.Context()))
 	if errors.Is(err, errUpdateCheckDisabled) {
 		writeError(w, http.StatusConflict, err.Error())
 		return

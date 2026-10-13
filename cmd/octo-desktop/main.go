@@ -605,7 +605,7 @@ func checkForUpdates(bridge *nativeBridge) { runUpdateCheck(bridge, true) }
 // machine is the server's business (versionRefreshInterval), not this loop's.
 const trayReadInterval = time.Minute
 
-// trayCheckTimeout budgets one tray-initiated lookup. It matches the server's
+// trayCheckTimeout budgets a tray-initiated lookup made with no hub bound. It matches the server's
 // own versionCheckTimeout: upgrade.Check walks GitHub plus the mirrors on a
 // parent-bounded budget, and anything much shorter never reaches a mirror.
 const trayCheckTimeout = 10 * time.Second
@@ -703,16 +703,18 @@ func trayLookup(bridge *nativeBridge, manual bool) (string, bool, error) {
 		return latest, needs, nil
 	}
 
+	// The hub budgets its own lookup (and any wait for one already in flight),
+	// so only the hub-less path needs a deadline here.
+	if srv != nil {
+		return srv.RefreshLatestVersion(context.Background())
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), trayCheckTimeout)
 	defer cancel()
-	if srv == nil {
-		latest, err := upgrade.Check(ctx)
-		if err != nil {
-			return "", false, err
-		}
-		return latest, upgrade.NeedsUpdate(strings.TrimPrefix(version.Version, "v"), latest), nil
+	latest, err := upgrade.Check(ctx)
+	if err != nil {
+		return "", false, err
 	}
-	return srv.RefreshLatestVersion(ctx)
+	return latest, upgrade.NeedsUpdate(strings.TrimPrefix(version.Version, "v"), latest), nil
 }
 
 // listenHub binds addr, retrying for up to grace so a just-stopped daemon has

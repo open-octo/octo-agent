@@ -408,6 +408,64 @@ func TestStartVersionRefresh_SkipsALookupThatAlreadyLanded(t *testing.T) {
 	}
 }
 
+// TestRefreshLatestVersion_TakesARefreshThatLandedWhileWaiting: a forced check
+// that queued behind an in-flight refresh returns that refresh's answer rather
+// than spending a second request (and the remains of its budget) on the same
+// question — which is also what collapses repeated clicks into one lookup.
+func TestRefreshLatestVersion_TakesARefreshThatLandedWhileWaiting(t *testing.T) {
+	var hits int32
+	mux := http.NewServeMux()
+	var fake *httptest.Server
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Redirect(w, r, fake.URL+"/releases/tag/v9.9.9", http.StatusFound)
+	})
+	fake = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
+
+	origURL, origMirrors := upgrade.BaseURL, upgrade.MirrorBaseURLs
+	upgrade.BaseURL, upgrade.MirrorBaseURLs = fake.URL, nil
+	t.Cleanup(func() { upgrade.BaseURL, upgrade.MirrorBaseURLs = origURL, origMirrors })
+
+	origV, origC := version.Version, version.Commit
+	version.Version, version.Commit = "0.18.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = origV, origC })
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false, UpdateCheck: true})
+	srv.versionChecking.Store(true) // a refresh is in flight
+
+	type result struct {
+		latest string
+		needs  bool
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		latest, needs, err := srv.RefreshLatestVersion(context.Background())
+		done <- result{latest, needs, err}
+	}()
+	time.Sleep(20 * time.Millisecond) // let the check queue behind it
+
+	// The in-flight refresh lands, then releases the token.
+	if _, _, err := srv.checkAndStore(context.Background(), "0.18.0"); err != nil {
+		t.Fatalf("in-flight refresh: %v", err)
+	}
+	baseline := atomic.LoadInt32(&hits)
+	srv.versionChecking.Store(false)
+
+	select {
+	case r := <-done:
+		if r.err != nil || r.latest != "9.9.9" || !r.needs {
+			t.Fatalf("queued check = (%q, %v, %v), want (9.9.9, true, nil)", r.latest, r.needs, r.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("queued check never returned")
+	}
+	if got := atomic.LoadInt32(&hits); got != baseline {
+		t.Errorf("queued check cost %d upstream request(s), want 0", got-baseline)
+	}
+}
+
 // TestRefreshLatestVersion_DisabledReportsError: a server that performs no
 // lookups hands back an error rather than a confident "you're up to date" the
 // tray would happily toast.
