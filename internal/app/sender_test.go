@@ -16,6 +16,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/provider"
 	"github.com/open-octo/octo-agent/internal/provider/anthropic"
 	"github.com/open-octo/octo-agent/internal/provider/openai"
+	"github.com/open-octo/octo-agent/internal/provider/responses"
 )
 
 func TestSender_PassesRequestThrough(t *testing.T) {
@@ -313,16 +314,75 @@ func TestBuildClient_PassesHeadersThrough(t *testing.T) {
 		t.Errorf("anthropic client Headers = %+v, want X-Tenant-Id=tenant-42", ac.Headers)
 	}
 
+	p, err = buildClient("deepseek", "test-key", "", "", headers, nil)
+	if err != nil {
+		t.Fatalf("buildClient(deepseek): %v", err)
+	}
+	oc, ok := p.(*openai.Client)
+	if !ok {
+		t.Fatalf("buildClient(deepseek) returned %T, want *openai.Client", p)
+	}
+	if oc.Headers["X-Tenant-Id"] != "tenant-42" {
+		t.Errorf("openai client Headers = %+v, want X-Tenant-Id=tenant-42", oc.Headers)
+	}
+
 	p, err = buildClient(ProviderOpenAI, "test-key", "", "", headers, nil)
 	if err != nil {
 		t.Fatalf("buildClient(openai): %v", err)
 	}
+	rc, ok := p.(*responses.Client)
+	if !ok {
+		t.Fatalf("buildClient(openai) returned %T, want *responses.Client", p)
+	}
+	if rc.Headers["X-Tenant-Id"] != "tenant-42" {
+		t.Errorf("responses client Headers = %+v, want X-Tenant-Id=tenant-42", rc.Headers)
+	}
+}
+
+// The OpenAI vendor speaks the Responses API only to api.openai.com itself; a
+// redirected base URL keeps Chat Completions for compatible servers.
+func TestBuildClient_OpenAIVendorProtocolByBaseURL(t *testing.T) {
+	for _, base := range []string{"", "https://api.openai.com", "https://api.openai.com/", "https://api.openai.com/v1", "https://api.openai.com/v1/"} {
+		p, err := buildClient(ProviderOpenAI, "test-key", base, "", nil, nil)
+		if err != nil {
+			t.Fatalf("buildClient(openai, %q): %v", base, err)
+		}
+		rc, ok := p.(*responses.Client)
+		if !ok {
+			t.Errorf("buildClient(openai, %q) returned %T, want *responses.Client", base, p)
+			continue
+		}
+		if !rc.ClampMaxEffort {
+			t.Errorf("buildClient(openai, %q): ClampMaxEffort = false, want true", base)
+		}
+	}
+
+	p, err := buildClient(ProviderOpenAI, "test-key", "https://proxy.example/v1", "", nil, nil)
+	if err != nil {
+		t.Fatalf("buildClient(openai, proxy): %v", err)
+	}
 	oc, ok := p.(*openai.Client)
 	if !ok {
-		t.Fatalf("buildClient(openai) returned %T, want *openai.Client", p)
+		t.Fatalf("buildClient(openai, proxy) returned %T, want *openai.Client", p)
 	}
-	if oc.Headers["X-Tenant-Id"] != "tenant-42" {
-		t.Errorf("openai client Headers = %+v, want X-Tenant-Id=tenant-42", oc.Headers)
+	if oc.BaseURL != "https://proxy.example/v1" || oc.Dialect != openai.DialectOpenAI {
+		t.Errorf("proxy client BaseURL = %q Dialect = %q", oc.BaseURL, oc.Dialect)
+	}
+
+	// A Custom endpoint pointed at api.openai.com keeps the protocol it chose.
+	p, err = buildClient(ProviderCustom, "test-key", "https://api.openai.com", "openai", nil, nil)
+	if err != nil {
+		t.Fatalf("buildClient(custom): %v", err)
+	}
+	if _, ok := p.(*openai.Client); !ok {
+		t.Errorf("buildClient(custom, openai) returned %T, want *openai.Client", p)
+	}
+	p, err = buildClient(ProviderCustom, "test-key", "https://opencode.ai/zen/go/v1", "openai-responses", nil, nil)
+	if err != nil {
+		t.Fatalf("buildClient(custom, openai-responses): %v", err)
+	}
+	if rc, ok := p.(*responses.Client); !ok || rc.ClampMaxEffort {
+		t.Errorf("buildClient(custom, openai-responses) = %T (ClampMaxEffort must stay false)", p)
 	}
 }
 

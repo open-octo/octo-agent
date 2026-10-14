@@ -6,6 +6,7 @@ import (
 	"github.com/open-octo/octo-agent/internal/agent"
 	"github.com/open-octo/octo-agent/internal/provider/anthropic"
 	"github.com/open-octo/octo-agent/internal/provider/openai"
+	"github.com/open-octo/octo-agent/internal/provider/responses"
 )
 
 func TestVendor_KimiCodingPlan(t *testing.T) {
@@ -158,6 +159,8 @@ func TestBuildClient_EmptyBaseURL_UsesVendorEndpoint(t *testing.T) {
 		case *openai.Client:
 			got = c.BaseURL
 		case *anthropic.Client:
+			got = c.BaseURL
+		case *responses.Client:
 			got = c.BaseURL
 		default:
 			t.Errorf("buildClient(%s): unexpected client type %T", v.ID, client)

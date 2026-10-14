@@ -208,6 +208,13 @@ func buildClient(name, apiKey, baseURL, protocol string, headers map[string]stri
 	if proto == "" {
 		return nil, fmt.Errorf("provider %q requires a protocol (\"anthropic\", \"openai\" or \"openai-responses\")", name)
 	}
+	// OpenAI's own endpoint gets the Responses API: from GPT-5.4 on, Chat
+	// Completions rejects function tools unless reasoning_effort is "none".
+	// A redirected base URL (OPENAI_BASE_URL, a proxy, a compatible server)
+	// keeps Chat Completions, which such servers are far more likely to speak.
+	if name == ProviderOpenAI && isOfficialOpenAIBaseURL(baseURL) {
+		proto = "openai-responses"
+	}
 	// The key-required policy lives here, not in the wire clients: the same
 	// openai client serves api.openai.com (key mandatory) and a keyless local
 	// Ollama behind the Custom vendor. A client built with an empty key sends
@@ -251,12 +258,20 @@ func buildClient(name, apiKey, baseURL, protocol string, headers map[string]stri
 		if baseURL != "" {
 			client.BaseURL = baseURL
 		}
+		client.ClampMaxEffort = name == ProviderOpenAI
 		client.Headers = headers
 		client.Limiter = limiter
 		return client, nil
 	default:
 		return nil, fmt.Errorf("unknown protocol %q for provider %q", proto, name)
 	}
+}
+
+// isOfficialOpenAIBaseURL reports whether baseURL is api.openai.com itself,
+// with or without a trailing slash or "/v1".
+func isOfficialOpenAIBaseURL(baseURL string) bool {
+	base := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+	return base == openai.DefaultBaseURL
 }
 
 // sender adapts a provider.Provider into agent.Sender. Keeping the adapter here

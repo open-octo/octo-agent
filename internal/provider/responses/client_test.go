@@ -141,6 +141,32 @@ func TestSend_ReasoningEffortAndMinTokens(t *testing.T) {
 	}
 }
 
+func TestSend_ClampMaxEffort(t *testing.T) {
+	for _, tc := range []struct {
+		clamp bool
+		want  string
+	}{{false, "max"}, {true, "xhigh"}} {
+		var got map[string]any
+		c, _ := newTestClient(t, func(w http.ResponseWriter, body map[string]any) {
+			got = body
+			_, _ = w.Write([]byte(`{"status":"completed","output":[]}`))
+		})
+		c.ClampMaxEffort = tc.clamp
+		_, err := c.Send(context.Background(), provider.Request{
+			Model:           "m",
+			Messages:        []agent.Message{agent.NewUserMessage("hi")},
+			ReasoningEffort: "max",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, _ := got["reasoning"].(map[string]any)
+		if r["effort"] != tc.want {
+			t.Errorf("ClampMaxEffort=%v: reasoning = %v, want effort %q", tc.clamp, got["reasoning"], tc.want)
+		}
+	}
+}
+
 func TestSend_ToolCallWithReasoning(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, _ map[string]any) {
 		_, _ = w.Write([]byte(`{

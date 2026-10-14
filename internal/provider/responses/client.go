@@ -64,6 +64,11 @@ type Client struct {
 	// Headers are extra HTTP headers sent with every request, applied after
 	// the built-in ones so a key here overrides them.
 	Headers map[string]string
+
+	// ClampMaxEffort sends octo's "max" effort as "xhigh", the top tier
+	// OpenAI's gpt-5.x models accept. Set it for the "openai" vendor; other
+	// Responses servers get the effort verbatim.
+	ClampMaxEffort bool
 }
 
 // New constructs a Client. An empty key is accepted and sends no
@@ -131,11 +136,15 @@ func (c *Client) buildRequest(req provider.Request, stream bool) ([]byte, error)
 		// The connection test asks for a single token; the API rejects that.
 		body.MaxOutputTokens = minMaxOutputTokens
 	}
-	// Forwarded verbatim: the API's effort enum ("none".."max") covers every
-	// level octo uses. reasoning.summary is deliberately not requested — some
-	// accounts must be verified before summaries are allowed.
-	if req.ReasoningEffort != "" {
-		body.Reasoning = &apiReasoning{Effort: req.ReasoningEffort}
+	// The API's effort enum ("none".."max") covers every level octo uses, but
+	// which values a model accepts varies (see ClampMaxEffort).
+	// reasoning.summary is deliberately not requested — some accounts must be
+	// verified before summaries are allowed.
+	if effort := req.ReasoningEffort; effort != "" {
+		if c.ClampMaxEffort && effort == "max" {
+			effort = "xhigh"
+		}
+		body.Reasoning = &apiReasoning{Effort: effort}
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
