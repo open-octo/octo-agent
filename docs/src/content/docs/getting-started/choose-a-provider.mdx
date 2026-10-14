@@ -5,8 +5,10 @@ description: Anthropic, OpenAI, DeepSeek/Kimi/Bailian, or any compatible endpoin
 
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-octo speaks two wire protocols natively — Anthropic Messages and OpenAI Chat Completions — so
-"which provider" really means "which of the two protocols does it speak."
+octo speaks three wire protocols natively — Anthropic Messages, OpenAI Chat Completions, and the
+OpenAI Responses API — so "which provider" really means "which of these protocols does it speak."
+Most vendors speak one of the first two; Responses is for endpoints that serve some models only on
+`/v1/responses` (OpenCode Go, for example).
 
 <Tabs>
 <TabItem label="Anthropic">
@@ -30,7 +32,7 @@ DeepSeek, Bailian, and other OpenAI-compatible APIs use the same protocol.
 <TabItem label="Custom endpoint">
 
 Self-hosted and third-party endpoints (vLLM, OpenRouter, a proxy) use the `custom` vendor — the
-only one that takes a custom base URL. Its wire protocol (`openai` | `anthropic`) is chosen per
+only one that takes a custom base URL. Its wire protocol (`openai` | `anthropic` | `openai-responses`) is chosen per
 config entry, so set it up once with `octo config` (choose **Custom** → pick the protocol → enter
 base URL + model):
 

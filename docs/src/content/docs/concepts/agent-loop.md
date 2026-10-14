@@ -13,7 +13,7 @@ Every octo interface — CLI, web, IM — drives the same loop underneath:
 
 ## Streaming
 
-Both providers stream by default — text deltas and tool-call argument fragments arrive
+All three protocols stream by default — text deltas and tool-call argument fragments arrive
 incrementally and are re-aggregated before dispatch. `--stream=false` buffers a turn and prints only
 the final text, which is what you want when capturing output into a file or a script.
 

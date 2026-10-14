@@ -5,8 +5,9 @@ description: Anthropic、OpenAI、DeepSeek/Kimi/百炼，或任意兼容端点�
 
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-octo 原生支持两种协议——Anthropic Messages 和 OpenAI Chat Completions——所以"选哪个 provider"实际上是
-在这两种协议里选一种。
+octo 原生支持三种协议：Anthropic Messages、OpenAI Chat Completions 和 OpenAI Responses API。所以
+"选哪个 provider"，说到底是看它用哪种协议。大多数厂商用的是前两种；Responses 留给那些只在
+`/v1/responses` 上提供部分模型的端点，比如 OpenCode Go。
 
 <Tabs>
 <TabItem label="Anthropic">
@@ -30,7 +31,7 @@ DeepSeek、百炼，以及其他 OpenAI 兼容 API 都走同一套协议。
 <TabItem label="自定义端点">
 
 自托管和第三方端点（vLLM、OpenRouter、代理）走 `custom` vendor——唯一支持自定义 base URL 的一种。
-它的协议（`openai` | `anthropic`）按配置项单独选择，用 `octo config` 设置一次即可（选 **Custom** →
+它的协议（`openai` | `anthropic` | `openai-responses`）按配置项单独选择，用 `octo config` 设置一次即可（选 **Custom** →
 选协议 → 填 base URL + model）：
 
 ```bash
