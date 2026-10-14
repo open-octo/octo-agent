@@ -1731,6 +1731,7 @@ func TestIsMaxTokensTooLargeErr(t *testing.T) {
 		"max_tokens too large for model",
 		"max tokens exceeds the model maximum",
 		"`max_tokens` must be less than or equal to 8192",
+		"max_output_tokens is greater than the maximum allowed for this model",
 	}
 	for _, s := range yes {
 		if !isMaxTokensTooLargeErr(errors.New(s)) {

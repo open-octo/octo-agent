@@ -52,8 +52,10 @@ type Vendor struct {
 // display order in the Web UI onboarding dropdown.
 var Registry = []Vendor{
 	{
-		ID:             "openai",
-		DisplayName:    "OpenAI",
+		ID:          "openai",
+		DisplayName: "OpenAI",
+		// buildClient sends api.openai.com itself to the Responses API; only a
+		// redirected base URL actually speaks this Chat Completions protocol.
 		Protocol:       "openai",
 		API:            "openai-completions",
 		DefaultBaseURL: "https://api.openai.com",

@@ -1945,7 +1945,8 @@ func isMaxTokensTooLargeErr(err error) bool {
 		return false
 	}
 	s := strings.ToLower(err.Error())
-	if !strings.Contains(s, "max_tokens") && !strings.Contains(s, "max tokens") {
+	// max_output_tokens is the Responses API's name for the same limit.
+	if !strings.Contains(s, "max_tokens") && !strings.Contains(s, "max tokens") && !strings.Contains(s, "max_output_tokens") {
 		return false
 	}
 	for _, marker := range []string{"exceed", "greater than", "too large", "maximum", "at most", "less than or equal"} {
