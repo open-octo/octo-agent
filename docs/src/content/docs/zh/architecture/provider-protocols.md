@@ -5,7 +5,8 @@ description: anthropic、openai、responses 三个适配器各自屏蔽掉了什
 
 octo 支持三种协议。Provider 各自的特殊之处完全封装在
 `internal/provider/{anthropic,openai,responses}/` 里——agent 层从不关心自己在跟哪种协议打交道。
-命名 vendor 的协议是固定的；Custom 端点用 `protocol: openai | anthropic | openai-responses` 自己选。
+命名 vendor 的协议是固定的（唯一的例外是 OpenAI，见下文）；Custom 端点用
+`protocol: openai | anthropic | openai-responses` 自己选。
 
 ## Anthropic Messages
 
@@ -33,8 +34,10 @@ octo 支持三种协议。Provider 各自的特殊之处完全封装在
 
 ## OpenAI Responses
 
-- 请求 `POST /v1/responses`，认证走 `Authorization: Bearer`。只有 Custom 端点会用到
-  （`protocol: openai-responses`），命名 vendor 仍然走 Chat Completions。
+- 请求 `POST /v1/responses`，认证走 `Authorization: Bearer`。Custom 端点用
+  `protocol: openai-responses` 选它；OpenAI vendor 只要 base URL 是 `api.openai.com` 本身也走它，
+  因为从 GPT-5.4 起，Chat Completions 只在 `reasoning_effort` 为 `none` 时才接受函数工具。
+  OpenAI vendor 改了 base URL（`OPENAI_BASE_URL`、代理）仍走 Chat Completions，其他命名 vendor 也一样。
 - 每次请求都是无状态的（`store: false`），每一轮都把完整历史发过去。
 - `system` 放在顶层的 `instructions` 字段里。
 - 函数工具是扁平结构（`{type: "function", name, parameters, strict: false}`），不嵌在

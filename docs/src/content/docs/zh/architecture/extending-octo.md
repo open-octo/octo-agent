@@ -53,7 +53,7 @@ type Adapter interface {
 
 ## 新增一个 Provider 协议
 
-第三种 wire 格式（在 Anthropic Messages 和 OpenAI Chat Completions 之外）就是
+新的 wire 格式（在 Anthropic Messages、OpenAI Chat Completions 和 OpenAI Responses 之外）就是
 `internal/provider/` 下的一个新包，实现 `provider.Provider`（必须），以及可选的
 `provider.StreamingProvider` / `provider.ToolProvider` / `provider.ToolStreamingProvider`。
 [Provider 协议](/docs/zh/architecture/provider-protocols/)里描述的、面向 agent 的 `Sender`

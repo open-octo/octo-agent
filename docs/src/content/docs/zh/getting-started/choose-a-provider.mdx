@@ -25,7 +25,9 @@ export OPENAI_API_KEY=sk-...
 octo --provider openai --model gpt-4o-mini "..."
 ```
 
-DeepSeek、百炼，以及其他 OpenAI 兼容 API 都走同一套协议。
+直连 `api.openai.com` 时 octo 用的是 Responses API，因为从 GPT-5.4 起，Chat Completions 只有在关掉推理时
+才接受函数工具。把 `OPENAI_BASE_URL` 指到别的地址，就改用 Chat Completions，也就是 DeepSeek、百炼和其他
+OpenAI 兼容 API 用的那套协议。
 
 </TabItem>
 <TabItem label="自定义端点">

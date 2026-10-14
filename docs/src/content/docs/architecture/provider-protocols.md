@@ -5,8 +5,8 @@ description: What the anthropic, openai and responses adapters each normalize aw
 
 octo speaks three wire formats. Provider quirks are encapsulated entirely in
 `internal/provider/{anthropic,openai,responses}/` — the agent layer never branches on which
-protocol it's talking to. Named vendors pin their protocol; a Custom endpoint picks one with
-`protocol: openai | anthropic | openai-responses`.
+protocol it's talking to. Named vendors pin their protocol (the one exception is OpenAI, below); a
+Custom endpoint picks one with `protocol: openai | anthropic | openai-responses`.
 
 ## Anthropic Messages
 
@@ -34,8 +34,11 @@ protocol it's talking to. Named vendors pin their protocol; a Custom endpoint pi
 
 ## OpenAI Responses
 
-- `POST /v1/responses`, auth via `Authorization: Bearer`. Only Custom endpoints use it
-  (`protocol: openai-responses`); named vendors keep Chat Completions.
+- `POST /v1/responses`, auth via `Authorization: Bearer`. Custom endpoints choose it with
+  `protocol: openai-responses`, and the OpenAI vendor uses it whenever its base URL is
+  `api.openai.com` itself: from GPT-5.4 on, Chat Completions rejects function tools unless
+  `reasoning_effort` is `none`. An OpenAI vendor pointed at another base URL (`OPENAI_BASE_URL`, a
+  proxy) keeps Chat Completions; every other named vendor does too.
 - Every request is stateless (`store: false`): the full history is sent each turn.
 - `system` goes in the top-level `instructions` field.
 - Function tools are flat (`{type: "function", name, parameters, strict: false}`), not nested

@@ -26,7 +26,9 @@ export OPENAI_API_KEY=sk-...
 octo --provider openai --model gpt-4o-mini "..."
 ```
 
-DeepSeek, Bailian, and other OpenAI-compatible APIs use the same protocol.
+Against `api.openai.com` itself octo uses the Responses API, since from GPT-5.4 on Chat Completions
+rejects function tools unless reasoning is off. Point `OPENAI_BASE_URL` somewhere else and it uses
+Chat Completions instead, the protocol DeepSeek, Bailian, and other OpenAI-compatible APIs speak.
 
 </TabItem>
 <TabItem label="Custom endpoint">

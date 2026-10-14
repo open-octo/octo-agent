@@ -55,7 +55,7 @@ needed above `internal/channel/`.
 
 ## Adding a provider protocol
 
-A third wire format (beyond Anthropic Messages and OpenAI Chat Completions) is a new package under
+A new wire format (beyond Anthropic Messages, OpenAI Chat Completions and OpenAI Responses) is a new package under
 `internal/provider/`, implementing `provider.Provider` (required) and optionally
 `provider.StreamingProvider` / `provider.ToolProvider` / `provider.ToolStreamingProvider`. The
 agent-facing `Sender` stack described in [Provider protocols](/docs/architecture/provider-protocols/)
