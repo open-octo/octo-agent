@@ -941,7 +941,8 @@
   height: 28px; width: 200px; padding: 0 10px; border: 1px solid var(--blue-5);
   border-radius: 8px; font-size: 12.5px; color: var(--text); background: var(--bg-container); outline: none;
 }
-.add-input.win-input { width: 120px; }
+/* Sized in ch (the field is monospace) so the "Auto, or e.g. 1M" hint is never clipped. */
+.add-input.win-input { width: calc(17ch + 22px); }
 /* The editor opens on its own line right under the chip it edits. */
 .win-row { flex-basis: 100%; }
 .win-field {
