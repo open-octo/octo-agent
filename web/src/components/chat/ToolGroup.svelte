@@ -647,8 +647,11 @@
               {undone[tool.id] ? $t('tools.undo_done') : $t('tools.undo_overwrite')}
             </button>
           {/if}
-        {:else if tool.stdout && tool.stdout.length > 0}
-          <!-- tool.stdout is already one line per array entry (see
+        {:else if tool.stdout && tool.stdout.length > 0 && (cmdText || !tool.done)}
+          <!-- A terminal's stdout IS its output, so it stays after the command
+               ends. Any other tool's stdout (an MCP server's progress reports)
+               is only a live view: once done, fall through to the result.
+               tool.stdout is already one line per array entry (see
                appendToolStdout in stores.ts) — joining it into a string and
                immediately re-splitting it on every streamed chunk was pure
                waste, and on a chatty command re-ran that join/split on the

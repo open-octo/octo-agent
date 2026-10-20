@@ -215,3 +215,22 @@ describe('tool header count', () => {
     expect(meta({ name: 'read_file', args: { path: '/tmp/a' }, result: 'a\nb' })).toBe('2 lines')
   })
 })
+
+// An MCP server's progress reports arrive as tool_stdout like a terminal's
+// output, but they are only a live view: once the call finishes the card must
+// show what the tool returned, not its last progress lines.
+describe('MCP progress lines', () => {
+  const mcp = (over: Record<string, unknown>) =>
+    tool({ name: 'mcp__vm__run', args: { cmd: 'make' }, ...over })
+
+  it('shows progress while the call runs', () => {
+    const el = render([mcp({ done: false, stdout: ['Compiling 3 files'] })])
+    expect(el.querySelector('.terminal-output')?.textContent).toContain('Compiling 3 files')
+  })
+
+  it('shows the result, not the progress, once done', () => {
+    const el = render([mcp({ stdout: ['Compiling 3 files'], result: 'exit 0' })])
+    expect(el.querySelector('.terminal-output')).toBeNull()
+    expect(el.querySelector('.tool-output')?.textContent).toContain('exit 0')
+  })
+})

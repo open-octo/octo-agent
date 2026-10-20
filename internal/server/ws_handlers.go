@@ -69,9 +69,10 @@ const maxLiveStdoutLines = 200
 // faster than this — without coalescing, that hammers the desktop shell's
 // webview render thread with one DOM update per line, which can pin it long
 // enough to trip Windows' "not responding" hang detector on the whole window.
-// Terminal is the only tool that streams EventToolProgress and it never runs
-// concurrently with another tool call (see concurrencySafe in agent.go), so a
-// single pending buffer on wsStreamWriter (not keyed by tool_id) is safe.
+// EventToolProgress only fires on the sequential dispatch path (terminal and
+// MCP tool calls; see concurrencySafe in agent.go), so no two tools stream at
+// once and a single pending buffer on wsStreamWriter (not keyed by tool_id)
+// is safe.
 const stdoutCoalesceWindow = 80 * time.Millisecond
 
 // appendEvent adds an already-broadcast turn event to the replay buffer.
@@ -2268,9 +2269,9 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		w.broadcastContextUsage()
 
 	case agent.EventToolProgress:
-		// Live output for a running terminal command (issue #1094). Only
-		// StreamingToolExecutor tools (currently just terminal) emit this;
-		// most tools never reach here. tool_id lets the frontend attribute the
+		// Live output for a running terminal command (issue #1094), or an MCP
+		// server's progress reports on a tool call. Most tools never reach
+		// here. tool_id lets the frontend attribute the
 		// chunk to the right card (see #1193's pickToolIndex).
 		w.server.liveStateMu.Lock()
 		if ls, ok := w.server.liveStates[w.sessionID]; ok {

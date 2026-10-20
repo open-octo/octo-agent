@@ -274,7 +274,7 @@ func TestExecuteMCP_SuccessfulCallClearsReauthFlag(t *testing.T) {
 		t.Fatal("setup: expected connection to be pre-flagged")
 	}
 
-	out, ok, err := executeMCP(ctx, "mcp__srv__ping", map[string]any{})
+	out, ok, err := executeMCP(ctx, "mcp__srv__ping", map[string]any{}, nil)
 	if !ok {
 		t.Fatal("expected executeMCP to recognize the mcp__ tool name")
 	}

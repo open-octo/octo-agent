@@ -279,7 +279,7 @@ func execToolDescribe(input map[string]any) (agent.ToolResult, error) {
 // execToolCall unwraps {name, arguments} and forwards to executeMCP, so the
 // real MCP dispatch (and the permission/hook machinery keyed on the real name)
 // runs unchanged.
-func execToolCall(ctx context.Context, input map[string]any) (agent.ToolResult, error) {
+func execToolCall(ctx context.Context, input map[string]any, progress func(chunk string)) (agent.ToolResult, error) {
 	name := strings.TrimSpace(stringArg(input, "name"))
 	if name == "" {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("mcp_call: name is required")
@@ -288,7 +288,7 @@ func execToolCall(ctx context.Context, input map[string]any) (agent.ToolResult, 
 	if args == nil {
 		args = map[string]any{}
 	}
-	res, ok, err := executeMCP(ctx, name, args)
+	res, ok, err := executeMCP(ctx, name, args, progress)
 	if !ok {
 		// executeMCP only declines names without the mcp__ prefix.
 		return agent.ToolResult{Text: ""}, fmt.Errorf("mcp_call: %q is not an MCP tool (MCP names look like 'mcp__<server>__<tool>'). If it's a built-in tool such as sub_agent, call it directly by name instead of through mcp_call", name)

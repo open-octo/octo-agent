@@ -129,7 +129,8 @@ func (r DefaultRegistry) Execute(ctx context.Context, name string, input map[str
 // exactly like Execute, but when progress is non-nil and the target tool
 // implements agent.StreamingToolExecutor (currently just TerminalTool), it
 // calls the tool's ExecuteStream instead of Execute so callers get
-// incremental chunks.
+// incremental chunks. MCP tool calls stream too: progress carries the
+// server's progress reports.
 //
 // This method is what makes agent.go's executor.(StreamingToolExecutor) type
 // assertion succeed for the registry as a whole — that assertion is on the
@@ -140,7 +141,7 @@ func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input m
 	// MCP tools land here too — route them first so an "mcp__…" name
 	// never falls through to the unknown-tool path. executeMCP returns
 	// ok=false when the name isn't ours, then dispatch continues below.
-	if res, ok, err := executeMCP(ctx, name, input); ok {
+	if res, ok, err := executeMCP(ctx, name, input, progress); ok {
 		return res, err
 	}
 
@@ -153,7 +154,7 @@ func (r DefaultRegistry) ExecuteStream(ctx context.Context, name string, input m
 	case toolDescribeName:
 		return execToolDescribe(input)
 	case toolCallName:
-		return execToolCall(ctx, input)
+		return execToolCall(ctx, input, progress)
 	}
 
 	// Read-before-write pre-check (skipped when no tracker is configured).

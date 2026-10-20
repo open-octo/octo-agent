@@ -1,11 +1,12 @@
 // Package mcp implements a Model Context Protocol client for octo. It speaks
-// MCP spec version 2024-11-05 over either stdio (subprocess) or Streamable
+// MCP spec version 2025-03-26 over either stdio (subprocess) or Streamable
 // HTTP transports, and exposes the tools / resources / prompts surfaces a
 // server can advertise.
 //
+// Of the server-initiated notifications, list_changed (re-list the surface)
+// and progress (on tool calls) are handled; any other is ignored.
+//
 // What this package does NOT cover (deliberately, for v1):
-//   - server-initiated notifications (list_changed, progress, log) — connect,
-//     list once, call;
 //   - resource subscriptions;
 //   - sampling (server asking client to call the LLM);
 //   - roots (client advertising filesystem roots to the server).
@@ -147,6 +148,11 @@ const (
 	MethodToolListChanged     = "notifications/tools/list_changed"
 	MethodResourceListChanged = "notifications/resources/list_changed"
 	MethodPromptListChanged   = "notifications/prompts/list_changed"
+
+	// MethodProgress is the server's report on a request that carried a
+	// progressToken in its _meta; Client.CallToolProgress routes it back to
+	// the waiting call.
+	MethodProgress = "notifications/progress"
 )
 
 // ── initialize handshake ─────────────────────────────────────────────────
@@ -226,6 +232,23 @@ type ListToolsResult struct {
 type CallToolParams struct {
 	Name      string         `json:"name"`
 	Arguments map[string]any `json:"arguments,omitempty"`
+	Meta      *RequestMeta   `json:"_meta,omitempty"`
+}
+
+// RequestMeta is the _meta object a request may carry. A ProgressToken asks
+// the server to report progress on the request; without one the spec forbids
+// it from sending any.
+type RequestMeta struct {
+	ProgressToken string `json:"progressToken,omitempty"`
+}
+
+// ProgressParams is the payload of notifications/progress. ProgressToken is
+// left undecoded because the spec allows a string or an integer.
+type ProgressParams struct {
+	ProgressToken json.RawMessage `json:"progressToken"`
+	Progress      float64         `json:"progress"`
+	Total         *float64        `json:"total,omitempty"`
+	Message       string          `json:"message,omitempty"`
 }
 
 // CallToolResult carries the tool's output as a list of content blocks,

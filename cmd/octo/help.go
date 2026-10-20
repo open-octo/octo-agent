@@ -84,8 +84,16 @@ Failure handling — a server that won't start, fails initialize, or times out
 during the handshake is logged on stderr and skipped. The session keeps going
 with the survivors. The connect timeout is 10s per server.
 
-What's not yet implemented (v1): server-initiated notifications, resource
-subscriptions, sampling (server → client LLM calls), roots.`)
+Server notifications — a server that announces its tools, resources or
+prompts changed is re-listed. octo asks for progress reports on tool calls;
+a server that sends them has them shown live under the running tool in the
+CLI and Web UI (the model still sees only the final result). A tool call fails after 60s
+without a response, but each progress report restarts that clock, up to 30
+minutes in total.
+
+What's not yet implemented (v1): other server-initiated notifications (e.g.
+logging), resource subscriptions, sampling (server → client LLM calls),
+roots.`)
 }
 
 func memoryHelp(w io.Writer) {

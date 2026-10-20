@@ -74,7 +74,7 @@ func TestToolCallTarget_Unwraps(t *testing.T) {
 
 func TestExecToolCall_RejectsNonMCP(t *testing.T) {
 	// mcp_call only proxies mcp__ tools; a bare name must error cleanly.
-	if _, err := execToolCall(context.Background(), map[string]any{"name": "terminal", "arguments": map[string]any{}}); err == nil {
+	if _, err := execToolCall(context.Background(), map[string]any{"name": "terminal", "arguments": map[string]any{}}, nil); err == nil {
 		t.Error("expected error proxying a non-MCP tool name")
 	}
 }

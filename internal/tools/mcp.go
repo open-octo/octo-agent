@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -123,7 +124,10 @@ func mcpToolDefs() []agent.ToolDefinition {
 // through to its normal dispatch. Errors from the underlying client are
 // propagated as-is so the agent loop sees the same error surface it would
 // for any other tool.
-func executeMCP(ctx context.Context, name string, input map[string]any) (out agent.ToolResult, ok bool, err error) {
+//
+// progress, when non-nil, receives the server's progress reports on a
+// tools/call as display lines (see progressLines).
+func executeMCP(ctx context.Context, name string, input map[string]any, progress func(chunk string)) (out agent.ToolResult, ok bool, err error) {
 	if !strings.HasPrefix(name, "mcp__") {
 		return agent.ToolResult{}, false, nil
 	}
@@ -172,7 +176,15 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out age
 		return agent.ToolResult{Text: formatPromptResult(result)}, true, nil
 
 	default:
-		result, err := conn.Client.CallTool(ctx, tool, input)
+		var onProgress func(mcp.ProgressParams)
+		if progress != nil {
+			onProgress = func(p mcp.ProgressParams) {
+				for _, line := range progressLines(p) {
+					progress(line)
+				}
+			}
+		}
+		result, err := conn.Client.CallToolProgress(ctx, tool, input, onProgress)
 		if err != nil {
 			markIfReauthRequired(conn, err)
 			return agent.ToolResult{}, true, err
@@ -188,6 +200,28 @@ func executeMCP(ctx context.Context, name string, input map[string]any) (out age
 		}
 		return res, true, nil
 	}
+}
+
+// progressLines renders one progress report as the line-per-chunk output the
+// tool-progress surfaces expect. The message is what a person wants to read —
+// some servers stream a command's live output through it — so it leads, one
+// chunk per line; the count is appended only when a total makes it a
+// fraction, since a bare ever-increasing counter on every output line is
+// noise. A report with no message shows just the count.
+func progressLines(p mcp.ProgressParams) []string {
+	count := strconv.FormatFloat(p.Progress, 'f', -1, 64)
+	if p.Total != nil {
+		count += "/" + strconv.FormatFloat(*p.Total, 'f', -1, 64)
+	}
+	msg := strings.TrimRight(p.Message, "\r\n")
+	if msg == "" {
+		return []string{"progress " + count}
+	}
+	lines := strings.Split(strings.ReplaceAll(msg, "\r\n", "\n"), "\n")
+	if p.Total != nil {
+		lines[len(lines)-1] += " (" + count + ")"
+	}
+	return lines
 }
 
 // markIfReauthRequired flags conn when a call through it failed because its
