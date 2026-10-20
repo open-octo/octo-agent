@@ -5,11 +5,12 @@
   // hint (the detailed tool/progress view is batch 2), and the composer is a
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
-  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs } from '../lib/stores'
+  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs, artifacts } from '../lib/stores'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
   import { renderMarkdown } from '../lib/markdown'
   import { t } from '../lib/i18n'
+  import ArtifactsSheet from './ArtifactsSheet.svelte'
 
   let { onBack, onViewApproval, initial = null, onInitialSent }: {
     onBack: () => void
@@ -26,6 +27,7 @@
   } = $props()
 
   const sid = $derived($activeSessionId ?? '')
+  let showArtifacts = $state(false)
   const msgs = $derived($chatMessages[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
   const session = $derived($sessions.find(s => s.id === sid) ?? null)
@@ -106,7 +108,17 @@
       {streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}
     </span>
   </div>
+  {#if $artifacts.length}
+    <button class="arts" onclick={() => (showArtifacts = true)} aria-label={$t('m.artifacts')}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+      <span>{$artifacts.length}</span>
+    </button>
+  {/if}
 </header>
+
+{#if showArtifacts}
+  <ArtifactsSheet onClose={() => (showArtifacts = false)} />
+{/if}
 
 {#if pendingApproval}
   <button class="approve-banner" onclick={onViewApproval}>
@@ -191,6 +203,23 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+  .arts {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 17px;
+    border: none;
+    background: var(--m-surface);
+    color: var(--m-accent);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: var(--m-shadow-card);
   }
   .dtitle .sub {
     display: flex;

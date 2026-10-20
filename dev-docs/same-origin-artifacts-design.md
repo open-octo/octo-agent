@@ -12,7 +12,6 @@
 
 - **不防恶意页面。** 页面与 octo 界面同源，它的脚本能读到访问密钥、能调 `/api`，能改宿主 DOM。被 prompt injection 写出来的 HTML 打开后等于已登录的用户。这是有意的取舍：换来的是所有访问方式下都可用、页面能力不打折。
 - 不包 IndexedDB、cookie、`sessionStorage`。它们与界面共享，但界面不依赖 `sessionStorage`，IndexedDB 按库名隔开，页面动它们属于上面的恶意范畴。
-- Mobile 不提供制品和轻应用，维持现状。
 - Markdown 制品预览不变，仍是宿主渲染后放进 srcdoc iframe。
 
 ## 路径
@@ -34,11 +33,13 @@
 
 ### 鉴权
 
-两个前缀都经 `requireAuth`，与 `/api` 同一套规则：
+`/_apps/<slug>/` 经 `requireAuth`，与 `/api` 同一套规则：
 
 - 本机客户端走回环豁免，桌面端、`localhost` 浏览器照常。
-- 远程客户端靠访问密钥 cookie。iframe 与界面同源，页面本身和它的子资源请求都会带上 `octo_access_key`（`SameSite=Strict` 对同源请求照发），不需要 token。
+- 远程客户端靠访问密钥 cookie。iframe 与界面同源，页面本身和它的子资源请求都会带上 `octo_access_key`（`SameSite=Strict` 对同源请求照发）。
 - 公开轻应用例外，见下文。
+
+`/_artifacts/<token>/` 不经 `requireAuth`：路径里的 token 就是凭证。签发 grant 需要鉴权，token 是 128 位随机数、24 小时不用即失效。这样没有 cookie 的 frame 也能加载页面——手机 App 的界面 origin 是 WebView 自己的（`capacitor://localhost`、`https://localhost`），跨站框 serve 上的页面，iOS 默认还拦第三方 cookie。页面的子资源请求和 `__octo/db` 都落在同一前缀下，同样凭 token。浏览器默认的 Referrer 策略对跨站请求只发 origin，token 不会经 Referer 带给外链。
 
 ### 制品 grant
 
@@ -46,11 +47,13 @@
 
 - 不再判断客户端是否本机，任何通过鉴权的客户端都拿到 grant。
 - 返回 `{"url": "/_artifacts/<token>/", "expires_at": ...}`，相对 URL，天然落在当前 origin。
-- token 仍然只是"这个 URL 对应哪份入口和哪个目录"的映射，24 小时滑动过期，服务重启失效。
+- token 是"这个 URL 对应哪份入口、哪个目录、哪个存储命名空间"的映射，也是访问这个前缀的凭证（见上文鉴权），24 小时滑动过期，服务重启失效。
 
 ### 轻应用
 
-轻应用不需要 grant，URL 由 slug 直接得出。slug 校验沿用 `handleGetLightApp`。
+轻应用在桌面和浏览器里不需要 grant，URL 由 slug 直接得出。slug 校验沿用 `handleGetLightApp`。
+
+手机 App 拿不到 cookie，用 `POST /api/light-apps/{slug}/grant`（requireAuth）换一个 `/_artifacts/<token>/`：入口是应用的 `index.html`、根目录是应用目录、命名空间是 slug，和 `/_apps/<slug>/` 上看到的是同一份页面、同一份存储。
 
 ## 注入脚本
 

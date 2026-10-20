@@ -10,15 +10,16 @@
 // Deliberately omitted (desktop-only or a later batch): optimistic-send
 // bookkeeping / steer queues / rollback, sub-agent & workflow panels,
 // turn-error banner, next-message suggestions. Mobile chat is a simplified
-// view; the detailed tool/progress rendering is batch 2. Artifacts are not
-// observed at all: they render from an origin only a browser on the octo
-// machine can reach (lib/artifacts.ts), so the phone has nothing to show.
+// view; the detailed tool/progress rendering is batch 2. Artifacts are
+// observed into the shared store, as on desktop, and the session's artifacts
+// sheet (ArtifactsSheet) renders them.
 import { get } from 'svelte/store'
 import { ws } from '../lib/ws'
 import { tr } from '../lib/i18n'
 import * as api from '../lib/api'
 import { inlineSlashCommand } from '../lib/inlineSlash'
 import { appendLiveAfterHistory, isReplayedUserEcho } from '../lib/userEchoDedup'
+import { observeArtifact, resetArtifacts } from '../lib/artifacts'
 import {
   chatMessages,
   chatStreaming,
@@ -42,8 +43,8 @@ import {
 } from '../lib/stores'
 
 // Apply one persisted history event to the stores. A trimmed copy of the
-// desktop's handleHistoryEvent (no artifact observation); the message-shaping is
-// the shared store helpers, so the two stay behaviourally aligned.
+// desktop's handleHistoryEvent; the message-shaping and artifact observation
+// are the shared helpers, so the two stay behaviourally aligned.
 function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: boolean) {
   if (ev.type === 'history_user_message') {
     addChatMsg(sid, {
@@ -68,6 +69,7 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
     })
   } else if (ev.type === 'tool_result') {
     updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload, ev.created_at)
+    observeArtifact(sid, ev.ui_payload, false)
   }
 }
 
@@ -86,6 +88,8 @@ export function loadMobileHistory(sid: string): Promise<void> {
     // it (same as the desktop's loadHistory).
     const live = get(chatMessages)[sid] ?? []
     clearMsgs(sid)
+    // The replay below re-observes every artifact in transcript order.
+    resetArtifacts(sid)
     const historyToolIds = new Set<string>()
     for (const ev of events) {
       if (ev.type === 'tool_call' && ev.tool_id) historyToolIds.add(ev.tool_id)
@@ -202,6 +206,8 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('tool_result', (ev: any) => {
     if (!forSid(ev)) return
     updateToolResult(sid, ev.tool_id, ev.result, ev.ui_payload, ev.ts)
+    // Never `live`: that flag only opens the desktop's side panel.
+    observeArtifact(sid, ev.ui_payload, false)
   }))
 
   cleanups.push(ws.on('tool_error', (ev: any) => {

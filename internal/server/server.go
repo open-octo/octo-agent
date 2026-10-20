@@ -873,9 +873,11 @@ func (s *Server) registerRoutes() {
 	s.api("GET /api/sessions/{id}/confirmation", s.handleGetSessionConfirmation)
 	s.api("GET /api/sessions/{id}/artifacts", s.handleGetArtifact)
 	s.api("POST /api/sessions/{id}/artifacts/grant", s.handleGrantArtifactOrigin)
-	s.api("GET /_artifacts/{token}", redirectToSlash)
-	s.api("GET /_artifacts/{token}/{path...}", s.handleArtifactPage)
-	s.api("POST /_artifacts/{token}/__octo/db/{name}", s.handleArtifactDB)
+	// Direct, not s.api: the token in the path is the credential (see
+	// artifactGrant), so a frame that carries no cookie can load the page.
+	s.mux.HandleFunc("GET /_artifacts/{token}", redirectToSlash)
+	s.mux.HandleFunc("GET /_artifacts/{token}/{path...}", s.handleArtifactPage)
+	s.mux.HandleFunc("POST /_artifacts/{token}/__octo/db/{name}", s.handleArtifactDB)
 	s.api("GET /api/sessions/{id}/diff", s.handleGetSessionDiff)
 	s.api("GET /api/sessions/{id}/diff/file", s.handleGetSessionFileDiff)
 	s.api("DELETE /api/sessions/{id}", s.handleDeleteSession)
@@ -961,6 +963,7 @@ func (s *Server) registerRoutes() {
 	s.api("DELETE /api/light-apps/{slug}", s.handleDeleteLightApp)
 	s.api("PUT /api/light-apps/{slug}/public", s.handleSetLightAppPublic)
 	s.api("PUT /api/light-apps/{slug}/mount", s.handleSetLightAppMount)
+	s.api("POST /api/light-apps/{slug}/grant", s.handleGrantLightApp)
 	// Direct, not s.api: a public app is served without auth; every other
 	// one goes through requireAuth inside the handler (lightapp_pages.go).
 	// The slashless redirect reveals nothing, and a public link typed without

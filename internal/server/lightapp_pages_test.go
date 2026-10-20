@@ -144,6 +144,51 @@ func TestLightAppPage_RemoteNeedsTheKey(t *testing.T) {
 	}
 }
 
+// A grant serves the app under a token URL, for a frame that carries no
+// cookie (the mobile app): the same entry, files and storage namespace as
+// /_apps/<slug>/.
+func TestGrantLightApp(t *testing.T) {
+	srv := newLightAppFixture(t, Config{Addr: "127.0.0.1:0", Tools: false},
+		`<!DOCTYPE html><html><head></head><body><h1>demo</h1></body></html>`)
+	grant := func(slug string, remote bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/light-apps/"+slug+"/grant", nil)
+		w := httptest.NewRecorder()
+		if remote {
+			req.RemoteAddr = "203.0.113.9:50000"
+			req.Host = "octo.example.com"
+			srv.http.Handler.ServeHTTP(w, req)
+		} else {
+			serveLoopback(srv.http.Handler, w, req)
+		}
+		return w
+	}
+	if w := grant("demo", true); w.Code != http.StatusUnauthorized {
+		t.Errorf("keyless remote grant: status = %d, want 401", w.Code)
+	}
+	if w := grant("nope", false); w.Code != http.StatusNotFound {
+		t.Errorf("unknown app: status = %d, want 404", w.Code)
+	}
+	w := grant("demo", false)
+	var res struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || !grantURLRe.MatchString(res.URL) {
+		t.Fatalf("grant: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if w2 := grant("demo", false); !strings.Contains(w2.Body.String(), res.URL) {
+		t.Errorf("re-grant changed the URL: %s, want %s", w2.Body.String(), res.URL)
+	}
+
+	page := remoteGet(srv, res.URL, false)
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "<h1>demo</h1>") ||
+		!strings.Contains(page.Body.String(), `"ns":"demo"`) {
+		t.Errorf("page via token: status = %d, body = %s", page.Code, page.Body.String())
+	}
+	if js := remoteGet(srv, res.URL+"app.js", false); js.Code != http.StatusOK || js.Body.String() != "console.log('demo')" {
+		t.Errorf("file via token: status = %d, body = %q", js.Code, js.Body.String())
+	}
+}
+
 func setPublic(t *testing.T, srv *Server, public bool) *httptest.ResponseRecorder {
 	t.Helper()
 	body := `{"public":false}`

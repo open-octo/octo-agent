@@ -961,6 +961,12 @@ export async function listLightApps(): Promise<LightApp[]> {
   return d.apps ?? []
 }
 
+// grantLightApp returns the app under a token URL (/_artifacts/<token>/) that
+// needs no access-key cookie — for the mobile app, whose frames carry none.
+export async function grantLightApp(slug: string): Promise<{ url: string }> {
+  return request<{ url: string }>(`/api/light-apps/${encodeURIComponent(slug)}/grant`, { method: 'POST' })
+}
+
 // Absolute path of the Light Apps directory (~/.octo/light-apps). Cached so
 // repeated lookups (per artifact selection) cost one request per session.
 let lightAppsDirCache: string | null = null

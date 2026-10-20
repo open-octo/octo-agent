@@ -118,15 +118,14 @@ func TestArtifactDB_ReadsAndWrites(t *testing.T) {
 	}
 }
 
-func TestArtifactDB_RequiresAuthRemotely(t *testing.T) {
+// As with the page itself, the token is the credential: a frame without the
+// cookie (the mobile app) reaches the page's databases.
+func TestArtifactDB_TokenIsTheCredential(t *testing.T) {
 	f := newPageFixture(t, "<h1>hi</h1>")
 	seedDB(t, "prices")
 	target := "/_artifacts/" + f.token(t) + "/__octo/db/prices"
-	if w := remotePost(f.srv, target, dbBody("SELECT 1"), false); w.Code != http.StatusUnauthorized {
-		t.Errorf("keyless remote: status = %d, want 401", w.Code)
-	}
-	if w := remotePost(f.srv, target, dbBody("SELECT 1"), true); w.Code != http.StatusOK {
-		t.Errorf("remote with cookie: status = %d, want 200 (%s)", w.Code, w.Body.String())
+	if w := remotePost(f.srv, target, dbBody("SELECT 1"), false); w.Code != http.StatusOK {
+		t.Errorf("keyless remote: status = %d, want 200 (%s)", w.Code, w.Body.String())
 	}
 }
 

@@ -44,12 +44,20 @@ const (
 )
 
 // artifactGrant ties a URL token to the one entry document it serves and the
-// directory the entry's relative references resolve in.
+// directory the entry's relative references resolve in. The token is itself the
+// credential for /_artifacts/<token>/: only an authenticated caller can mint
+// one, and it is 128 random bits that lapse after a day unused. That lets a
+// frame load the page where no access-key cookie reaches it — the mobile app,
+// whose WebView frames the server cross-site.
+//
+// A Light App can be granted too (grantLightApp): sessionID is empty, the entry
+// is the app's index.html, and the namespace is the slug, as on /_apps/<slug>/.
 type artifactGrant struct {
 	token     string
 	sessionID string
 	entry     string // absolute path of the HTML, as the transcript recorded it
 	root      string // filepath.Dir(entry)
+	ns        string // localStorage namespace handed to the page shim
 	lastUsed  time.Time
 }
 
@@ -108,7 +116,7 @@ func (s *Server) handleGrantArtifactOrigin(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "path was not written by this session")
 		return
 	}
-	g, expires, err := s.grantArtifact(id, served)
+	g, expires, err := s.grantPage(id, served, artifactNamespace(id, served))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -119,7 +127,7 @@ func (s *Server) handleGrantArtifactOrigin(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// grantArtifact returns the live grant for (session, entry), minting one when
+// grantPage returns the live grant for (session, entry), minting one when
 // none exists, together with its current expiry. Reusing the token across
 // re-issues keeps the frame's URL stable while the agent keeps rewriting the
 // file. Expired grants are swept here rather than by a timer: the map only
@@ -128,7 +136,7 @@ func (s *Server) handleGrantArtifactOrigin(w http.ResponseWriter, r *http.Reques
 // The expiry is computed under the lock: lastUsed is also written by
 // lookupGrant on the request goroutines of the frame, so a caller must not read
 // it once the lock is released. The other fields never change after minting.
-func (s *Server) grantArtifact(sessionID, entry string) (*artifactGrant, time.Time, error) {
+func (s *Server) grantPage(sessionID, entry, ns string) (*artifactGrant, time.Time, error) {
 	s.artifactGrantsMu.Lock()
 	defer s.artifactGrantsMu.Unlock()
 	now := time.Now()
@@ -154,6 +162,7 @@ func (s *Server) grantArtifact(sessionID, entry string) (*artifactGrant, time.Ti
 		sessionID: sessionID,
 		entry:     entry,
 		root:      filepath.Dir(entry),
+		ns:        ns,
 		lastUsed:  now,
 	}
 	s.artifactGrants[g.token] = g
@@ -187,7 +196,7 @@ func (s *Server) handleArtifactPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := r.PathValue("path")
-	shim := s.pageShim(artifactNamespace(g.sessionID, g.entry), false)
+	shim := s.pageShim(g.ns, false)
 	// Only the entry's own name maps to it: a real index.html beside a
 	// report.html entry is a page of its own, reachable by its name.
 	if rel == "" || rel == filepath.Base(g.entry) {

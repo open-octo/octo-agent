@@ -1,13 +1,16 @@
 <script lang="ts">
-  // Config tab: the server's capability inventory — skills, MCP servers,
-  // workflows, memories, trash — as a root list drilling into per-kind
-  // sections. Remote-control scope: skills/MCP get enable switches, the rest
-  // are read-only inventories; installing/editing stays on desktop.
+  // Config tab: the server's capability inventory — Light Apps, skills, MCP
+  // servers, workflows, memories, trash — as a root list drilling into
+  // per-kind sections. Remote-control scope: Light Apps open full-screen,
+  // skills/MCP get enable switches, the rest are read-only inventories;
+  // installing/editing stays on desktop.
   import { onMount } from 'svelte'
   import { showToast } from '../lib/stores'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
   import type { Skill, Workflow, Memory } from '../lib/types'
+  import PageViewer from './PageViewer.svelte'
+  import { pageSrc } from './pageURL'
 
   // The trash endpoint's real wire shape ({ files: [...] }); api.listTrash's
   // declared RecallFile[] doesn't match it (the desktop view casts around the
@@ -37,7 +40,7 @@
     invalid: 'm.mcp_invalid', disconnected: 'm.mcp_disconnected',
   }
 
-  type Section = 'root' | 'skills' | 'mcp' | 'workflows' | 'memory' | 'trash'
+  type Section = 'root' | 'apps' | 'skills' | 'mcp' | 'workflows' | 'memory' | 'trash'
   let section = $state<Section>('root')
 
   let loading = $state(true)
@@ -47,25 +50,29 @@
   let workflows = $state<Workflow[]>([])
   let memories = $state<Memory[]>([])
   let trash = $state<TrashEntry[]>([])
+  let apps = $state<api.LightApp[]>([])
 
   async function load() {
     loading = true
     loadError = false
-    const [sk, mc, wf, me, trs] = await Promise.all([
+    const [la, sk, mc, wf, me, trs] = await Promise.all([
+      api.listLightApps().catch(() => null),
       api.listSkills().catch(() => null),
       api.listMcpServers().catch(() => null),
       api.listWorkflowsView().catch(() => null),
       api.getMemories().catch(() => null),
       api.listTrash().catch(() => null),
     ])
+    if (la) apps = la
     if (sk) skills = sk
     if (mc) mcp = ((mc.servers ?? []) as unknown[]) as McpInfo[]
     if (wf) workflows = wf
     if (me) memories = me
     if (trs) trash = ((trs as any).files ?? trs ?? []) as TrashEntry[]
-    const failed = [sk, mc, wf, me, trs].filter(r => !r).length
-    loadError = failed === 5
-    if (failed > 0 && failed < 5) showToast(tr('m.partial_load_fail'), 'error')
+    const results = [la, sk, mc, wf, me, trs]
+    const failed = results.filter(r => !r).length
+    loadError = failed === results.length
+    if (failed > 0 && failed < results.length) showToast(tr('m.partial_load_fail'), 'error')
     loading = false
   }
   onMount(load)
@@ -119,9 +126,23 @@
     return `${(n / 1024 / 1024).toFixed(1)} MB`
   }
 
+  // The app being viewed. Its page loads from a token URL the server grants:
+  // the app's frame carries no access-key cookie (pageURL.ts).
+  let viewing = $state<{ slug: string; name: string; src: string; failed: boolean } | null>(null)
+  async function openApp(app: api.LightApp) {
+    viewing = { slug: app.slug, name: app.name || app.slug, src: '', failed: false }
+    try {
+      const { url } = await api.grantLightApp(app.slug)
+      if (viewing?.slug === app.slug) viewing = { ...viewing, src: pageSrc(url) }
+    } catch {
+      if (viewing?.slug === app.slug) viewing = { ...viewing, failed: true }
+    }
+  }
+
   const nEnabled = (a: number, b: number) =>
     $t('m.n_enabled').replace('{a}', String(a)).replace('{b}', String(b))
   const groups = $derived([
+    { key: 'apps' as Section, label: $t('m.light_apps'), count: $t('m.count_apps').replace('{n}', String(apps.length)) },
     { key: 'skills' as Section, label: $t('m.skills'), count: nEnabled(skills.filter(s => s.enabled).length, skills.length) },
     { key: 'mcp' as Section, label: $t('m.mcp'), count: nEnabled(mcp.filter(m => !m.disabled).length, mcp.length) },
     { key: 'workflows' as Section, label: $t('m.workflows'), count: $t('m.count_wf').replace('{n}', String(workflows.length)) },
@@ -129,7 +150,7 @@
     { key: 'trash' as Section, label: $t('m.trash'), count: $t('m.count_trash').replace('{n}', String(trash.length)) },
   ])
   const titleKeys: Record<Section, string> = {
-    root: 'm.tab_config', skills: 'm.skills', mcp: 'm.mcp', workflows: 'm.workflows', memory: 'm.memory', trash: 'm.trash',
+    root: 'm.tab_config', apps: 'm.light_apps', skills: 'm.skills', mcp: 'm.mcp', workflows: 'm.workflows', memory: 'm.memory', trash: 'm.trash',
   }
 </script>
 
@@ -159,6 +180,21 @@
         {/each}
       </div>
       <p class="hint">{$t('m.desktop_hint')}</p>
+    {/if}
+  {:else if section === 'apps'}
+    {#if apps.length === 0}<div class="empty">{$t('m.no_apps')}</div>{:else}
+      <div class="card group">
+        {#each apps as app (app.slug)}
+          <button class="row nav" onclick={() => openApp(app)}>
+            <span class="appicon">{app.icon || '📦'}</span>
+            <div class="names">
+              <span class="rlabel">{app.name || app.slug}</span>
+              {#if app.description}<span class="sub">{app.description}</span>{/if}
+            </div>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-4)" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        {/each}
+      </div>
     {/if}
   {:else if section === 'skills'}
     {#if skills.length === 0}<div class="empty">{$t('m.no_skills')}</div>{:else}
@@ -237,6 +273,16 @@
   {/if}
 </div>
 
+{#if viewing}
+  <PageViewer
+    title={viewing.name}
+    src={viewing.src}
+    loading={!viewing.src && !viewing.failed}
+    failed={viewing.failed}
+    onClose={() => (viewing = null)}
+  />
+{/if}
+
 <style>
   .head { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 18px 12px; }
   .head h1 { margin: 0; font-size: 24px; font-weight: 600; color: var(--m-text-strong); }
@@ -257,6 +303,7 @@
   .rval { flex: none; font-size: 12.5px; color: var(--m-text-3); }
   .sub { font-size: 12px; color: var(--m-text-3); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
   .tag { flex: none; font-size: 10px; padding: 1px 6px; border-radius: 9999px; background: var(--m-surface-2); color: var(--m-text-3); }
+  .appicon { flex: none; width: 28px; text-align: center; font-size: 20px; }
   .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
   .dot.ok { background: var(--m-success); }
   .dot.bad { background: var(--m-error); }

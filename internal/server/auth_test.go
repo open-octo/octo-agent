@@ -280,7 +280,12 @@ func TestRegisterRoutes_OnlyKnownUnauthenticated(t *testing.T) {
 		// Same split: a public app reads its declared databases without auth,
 		// read-only; every other app goes through requireAuth (db_pages.go).
 		"POST /_apps/{slug}/__octo/db/{name}": true,
-		"/":                                   true,
+		// The token in the path is the credential (artifactGrant): minting one
+		// needs the key, holding one is enough to load the page.
+		"GET /_artifacts/{token}":                   true,
+		"GET /_artifacts/{token}/{path...}":         true,
+		"POST /_artifacts/{token}/__octo/db/{name}": true,
+		"/": true,
 	}
 	if len(direct) != len(allowed) {
 		t.Errorf("expected exactly %d direct mux registrations, got %d", len(allowed), len(direct))

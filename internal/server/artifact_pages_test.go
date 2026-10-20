@@ -327,26 +327,37 @@ func TestArtifactPage_NotFound(t *testing.T) {
 	}
 }
 
-func TestArtifactPage_RequiresAuthRemotely(t *testing.T) {
+// The token is the credential: a remote frame without the access-key cookie —
+// the mobile app frames the server cross-site — loads the page and its files,
+// while a token nobody minted reaches nothing.
+func TestArtifactPage_TokenIsTheCredential(t *testing.T) {
 	f := newPageFixture(t, "<h1>hi</h1>")
 	tok := f.token(t)
-	req := httptest.NewRequest(http.MethodGet, "/_artifacts/"+tok+"/", nil)
+	remote := func(target string) int {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.RemoteAddr = "203.0.113.9:50000"
+		req.Host = "octo.example.com"
+		w := httptest.NewRecorder()
+		f.srv.http.Handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	for _, target := range []string{"/_artifacts/" + tok + "/", "/_artifacts/" + tok + "/app.js"} {
+		if code := remote(target); code != http.StatusOK {
+			t.Errorf("keyless remote %s: status = %d, want 200", target, code)
+		}
+	}
+	if code := remote("/_artifacts/" + strings.Repeat("0", 32) + "/"); code != http.StatusNotFound {
+		t.Errorf("unknown token: status = %d, want 404", code)
+	}
+	// Minting one still needs the key.
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+f.sessionID+"/artifacts/grant",
+		strings.NewReader(`{"path":"`+filepath.ToSlash(f.entry)+`"}`))
 	req.RemoteAddr = "203.0.113.9:50000"
 	req.Host = "octo.example.com"
 	w := httptest.NewRecorder()
 	f.srv.http.Handler.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
-		t.Errorf("keyless remote: status = %d, want 401", w.Code)
-	}
-	// The frame is same-origin with the UI, so its requests carry the cookie.
-	req = httptest.NewRequest(http.MethodGet, "/_artifacts/"+tok+"/app.js", nil)
-	req.RemoteAddr = "203.0.113.9:50000"
-	req.Host = "octo.example.com"
-	req.AddCookie(&http.Cookie{Name: accessKeyCookie, Value: f.srv.accessKey})
-	w = httptest.NewRecorder()
-	f.srv.http.Handler.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("remote with cookie: status = %d, want 200", w.Code)
+		t.Errorf("keyless remote grant: status = %d, want 401", w.Code)
 	}
 }
 

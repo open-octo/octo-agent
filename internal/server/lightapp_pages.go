@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ─── GET /_apps/{slug}/{path...} ────────────────────────────────────────────
@@ -68,6 +69,35 @@ func (s *Server) serveLightAppPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	servePageFile(w, r, appDir, rel, shim)
+}
+
+// ─── POST /api/light-apps/{slug}/grant ──────────────────────────────────────
+//
+// The same app under a token URL, /_artifacts/<token>/, for a client whose
+// frame carries no access-key cookie: the mobile app frames the server
+// cross-site. The page is served exactly as on /_apps/<slug>/ — same entry,
+// same directory, the slug as its storage namespace — so its data is shared
+// with the desktop view of the app.
+func (s *Server) handleGrantLightApp(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	if !safeLightAppSlug(slug) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	entry := filepath.Join(lightAppsDir(), slug, "index.html")
+	if fi, err := os.Stat(entry); err != nil || fi.IsDir() {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	g, expires, err := s.grantPage("", entry, slug)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"url":        "/_artifacts/" + g.token + "/",
+		"expires_at": expires.UTC().Format(time.RFC3339),
+	})
 }
 
 // ─── Storage export from the retired `<slug>.apps.localhost` origin ─────────

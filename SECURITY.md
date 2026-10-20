@@ -52,6 +52,11 @@ outbound connections only and expose no inbound HTTP routes.
   out of the UI, and its `localStorage` keys apart from the UI's, but that is
   protection against accidents, not against a hostile page. A Light App the
   user marks public is served without the key to anyone who has the link.
+  An `/_artifacts/<token>/` URL needs no key either: the token, minted only
+  for a caller holding the key, is the credential, so the mobile app's
+  cookie-less frames can load it. Anyone holding the URL can read the files
+  in that page's directory and use the page's databases until the token
+  lapses (a day unused, or a server restart).
 
 ## The access key
 
