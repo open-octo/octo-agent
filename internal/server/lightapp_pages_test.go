@@ -371,7 +371,7 @@ func TestLightAppExport(t *testing.T) {
 		{"api on the apps host", "demo.apps.localhost:8080", "/api/health", "127.0.0.1:1", nil},
 		{"bare host", "apps.localhost:8080", "/__octo_export", "127.0.0.1:1", nil},
 		{"LAN peer", "demo.apps.localhost:8080", "/__octo_export", "192.168.1.9:1", nil},
-		{"forwarded", "demo.apps.localhost:8080", "/__octo_export", "127.0.0.1:1", map[string]string{HeaderForwarded: "1"}},
+		{"forwarded", "demo.apps.localhost:8080", "/__octo_export", "127.0.0.1:1", map[string]string{"X-Forwarded-For": "1"}},
 	} {
 		if w := get(c.host, c.target, c.remote, c.hdr); w.Code != http.StatusNotFound {
 			t.Errorf("%s: status = %d, want 404", c.name, w.Code)

@@ -51,7 +51,7 @@ type wsConn struct {
 	// isLocalRequest, which a bare loopback peer address does not establish on
 	// its own. Fixed at upgrade. Gates referencing a file by its real local
 	// path, safe only when the browser and agent share a filesystem; a remote
-	// client (including a phone across the tunnel) falls back to upload.
+	// client (including a phone) falls back to upload.
 	loopback bool
 }
 

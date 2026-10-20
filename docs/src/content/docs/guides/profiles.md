@@ -23,7 +23,7 @@ Each profile gets its own:
 - **Sessions** — `sessions/`, session groups, the trash, input history
 - **Credentials and config** — `config.yml` (provider, model, endpoint, API key), `serve.env`
 - **Capabilities** — `skills/`, `workflows/`, `agents/`, and the built-in sets materialized beside them
-- **Connections** — `mcp.json` and its OAuth tokens, `channels.yml` and IM credentials, the tunnel identity
+- **Connections** — `mcp.json` and its OAuth tokens, `channels.yml` and IM credentials
 - **Governance** — `permissions.yml`, `audit.log`, hooks and their trust store
 - **Runtime state** — the backend's pid, logs, uploads, scheduled tasks, Light Apps, browser recordings
 

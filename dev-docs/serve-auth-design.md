@@ -72,7 +72,7 @@ mux. Decision order:
      not. A spoofable header is never consulted to WIDEN this — the peer
      address cannot come from a header. It is consulted only to withdraw the
      exemption: any forwarding header (`X-Forwarded-For`, `Forwarded`, `Via`,
-     octo's own `X-Octo-Forwarded`, …) means a relay sits in the path, and a
+     …) means a relay sits in the path, and a
      relay's loopback dial must not inherit the trust of someone at the
      keyboard. Faking one costs the sender the exemption; it can never buy it.
      The residual case is a plain TCP forward that rewrites `Host` and adds no
@@ -224,7 +224,7 @@ a separate-origin frontend authenticates with explicit headers.
   - any forwarding header from loopback, no key → 401 (a relayed request
     cannot use the exemption)
   - a forwarding header from loopback WITH a valid key → 200 (the key is the
-    gate for a relayed peer; octo's own tunnel sends exactly this shape)
+    gate for a relayed peer)
   - `--cors '*'` configured: foreign Origin from loopback still 403
 - Route-coverage assertion: every registered `/api/*` mux entry except
   `/api/health` and `/api/version` returns 401 to a keyless non-loopback

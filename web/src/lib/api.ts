@@ -1320,21 +1320,6 @@ export async function checkVersion(): Promise<{ latest: string; needs_update: bo
   return request('/api/version/check', { method: 'POST' })
 }
 
-// Managed tunnel (mobile pairing)
-
-export interface TunnelPairing {
-  enabled: boolean
-  pair_url?: string
-  relay?: string
-  tunnel_id?: string
-}
-
-// getTunnelPairing returns the managed-tunnel pairing material, or
-// { enabled: false } when `octo serve --tunnel` is not active.
-export async function getTunnelPairing(): Promise<TunnelPairing> {
-  return request<TunnelPairing>('/api/tunnel/pairing', { cache: 'no-store' })
-}
-
 // Browser automation setup
 
 export interface BrowserStatus {

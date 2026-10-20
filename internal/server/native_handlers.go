@@ -141,8 +141,8 @@ type nativePickFolderRequest struct {
 func (s *Server) handleNativePickFolder(w http.ResponseWriter, r *http.Request) {
 	// Same-machine only. In the desktop build every request is genuinely local
 	// anyway; the guard refuses to drive a native dialog on behalf of some other
-	// peer if the port is reachable — including a phone across octo's own
-	// tunnel, which dials the server from loopback (see isLocalRequest).
+	// peer if the port is reachable — including one behind a tunnel that dials
+	// the server from loopback (see isLocalRequest).
 	if !isLocalRequest(r) {
 		writeError(w, http.StatusForbidden, "native dialogs are available only from the local machine")
 		return

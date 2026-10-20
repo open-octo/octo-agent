@@ -14,7 +14,7 @@ func TestWithAddrArg_ReplacesEveryForm(t *testing.T) {
 		{"no addr", []string{"--no-supervisor"}},
 		{"separate value", []string{"--addr", "127.0.0.1:8088", "--no-supervisor"}},
 		{"single dash", []string{"-addr", "127.0.0.1:8088"}},
-		{"equals form", []string{"--addr=127.0.0.1:8088", "--tunnel"}},
+		{"equals form", []string{"--addr=127.0.0.1:8088", "--no-memory"}},
 		{"single dash equals", []string{"-addr=127.0.0.1:8088"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

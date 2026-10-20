@@ -106,14 +106,13 @@ Wire it into `MobileApp.svelte` at the root level so it overlays any tab.
 
 ## Out of scope
 
-- Push wakeups for killed apps (the server-side `internal/tunnel` wakeup frame
-  exists; the mobile push-token wiring is deferred — see mobile README).
+- Push wakeups for killed apps.
 - Question targeting (always broadcast to all of the user's clients; no
   per-client routing).
 
 ## Verification
 
-1. Start `octo serve --tunnel` + `octo-relay`; open the desktop web UI in one
+1. Start `octo serve`; open the desktop web UI in one
    tab and the mobile app (simulator) in another, each viewing a different
    session.
 2. Trigger an ask from desktop session B while viewing session A → toast

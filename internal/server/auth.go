@@ -109,16 +109,8 @@ func isLoopbackRemote(remoteAddr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// HeaderForwarded is the header octo's own managed tunnel stamps on every
-// request it replays into the local server (internal/tunnel/bridge.go defines
-// the same literal — a one-string constant is not worth a package dependency
-// between the two). The tunnel dials loopback and, having dropped the phone's
-// Host, dials it under a loopback Host too, so without this marker a phone
-// across the relay is indistinguishable from a browser on this machine.
-const HeaderForwarded = "X-Octo-Forwarded"
-
 // forwardedHeaders are set by something that relayed the request. ngrok,
-// cloudflared, Caddy and octo's own tunnel all add at least one; nginx does NOT
+// cloudflared and Caddy all add at least one; nginx does NOT
 // unless configured to (a bare proxy_pass sets only Host), which is why it
 // lands in the uncoverable case described on isLocalRequest rather than here.
 // Their presence means the peer we see is the relay, not the client, whichever
@@ -136,7 +128,6 @@ var forwardedHeaders = []string{
 	"X-Real-Ip",
 	"Forwarded",
 	"Via",
-	HeaderForwarded,
 }
 
 // isLocalRequest reports whether a request genuinely came from this machine —
@@ -146,8 +137,7 @@ var forwardedHeaders = []string{
 // affordances on.
 //
 // A loopback peer address alone does not answer it. Anything that forwards a
-// port — ngrok, cloudflared, a local reverse proxy, `ssh -L`, octo's own tunnel
-// — runs on this machine and dials us from loopback, so a remote client arrives
+// port — ngrok, cloudflared, a local reverse proxy, `ssh -L` — runs on this machine and dials us from loopback, so a remote client arrives
 // looking local. Two more signals narrow it down:
 //
 //   - a forwarding header means a relay is in the path (see forwardedHeaders);

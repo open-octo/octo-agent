@@ -22,7 +22,7 @@ octo --profile work
 - **会话**——`sessions/`、会话分组、回收站、输入历史
 - **凭证与配置**——`config.yml`（provider、模型、端点、API key）、`serve.env`
 - **能力**——`skills/`、`workflows/`、`agents/`，以及在旁边物化出来的那几套内置内容
-- **对外连接**——`mcp.json` 和它的 OAuth token、`channels.yml` 和 IM 凭证、tunnel 身份
+- **对外连接**——`mcp.json` 和它的 OAuth token、`channels.yml` 和 IM 凭证
 - **治理**——`permissions.yml`、`audit.log`、hooks 及其信任记录
 - **运行时状态**——后端的 pid、日志、上传、定时任务、轻应用、浏览器录制
 

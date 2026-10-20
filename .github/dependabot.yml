@@ -17,7 +17,6 @@ updates:
     directories:
       - "/"
       - "/cmd/octo-desktop"
-      - "/cmd/octo-relay"
     schedule:
       interval: "weekly"
     commit-message:

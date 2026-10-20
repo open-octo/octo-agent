@@ -69,7 +69,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		// browser is genuinely on this machine — desktop or localhost web —
 		// telling the frontend to pick files/folders by real path instead of
 		// uploading. A peer that merely reaches us over loopback because
-		// something forwards the port (ngrok, a proxy, octo's own tunnel) is not
+		// something forwards the port (ngrok, a proxy, cloudflared) is not
 		// local and falls back to upload; see isLocalRequest.
 		"native": s.cfg.Native != nil,
 		"local":  isLocalRequest(r),

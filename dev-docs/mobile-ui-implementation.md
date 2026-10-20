@@ -9,9 +9,7 @@ touch screen.
 This document specifies the replacement: a **separate Svelte view tree for
 mobile**, mounted on the **same store / WebSocket / API layer** the desktop UI
 already uses. The two are different *views*, not different apps. The remote is
-still plain `octo serve` — nothing here touches `internal/server`, and it builds
-on the transport in
-[`mobile-managed-tunnel-design.md`](mobile-managed-tunnel-design.md).
+still plain `octo serve` — nothing here touches `internal/server`.
 
 ## Positioning
 
@@ -111,8 +109,7 @@ directly: `connected` → "Connected to <host> · N sessions"; `connecting` /
 reconnecting → "Reconnecting…"; `disconnected` → "Offline · last synced N min
 ago". While not `connected`, `SessionCard` and `ProgressDetail` render the last
 known state with a "will update on reconnect" note instead of playing a live
-pulse. The full push-woken reconnect loop depends on the push wakeups from the
-managed-tunnel design; the state slots are in place now regardless.
+pulse. There are no push wakeups: the app reconnects when it is opened.
 
 ## Theming
 

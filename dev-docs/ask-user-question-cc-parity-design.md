@@ -300,7 +300,7 @@ nothing — `webdist` is `go:embed`-ed, so the frontend ships with the server
 that talks to it. The packaged mobile app is the exception: `npm run
 bundle-web` copies `webdist` into the Capacitor bundle
 (`mobile/capacitor.config.ts`), so its frontend is frozen at app-build time
-while the `octo serve` it tunnels to is upgraded independently. An app built
+while the `octo serve` it connects to is upgraded independently. An app built
 before this change reads `undefined` where it expects `question`, and its
 question card breaks until the app is rebuilt. That is accepted: the wire
 format stays single-shaped, and the mobile bundle is refreshed with the

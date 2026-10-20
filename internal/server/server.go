@@ -132,11 +132,6 @@ type Server struct {
 	artifactGrantsMu sync.Mutex
 	artifactGrants   map[string]*artifactGrant
 
-	// tunnelPairing holds the managed-tunnel pairing material the web UI renders
-	// as a QR, published by `octo serve --tunnel` via SetTunnelPairing. Nil when
-	// the tunnel is off. The server otherwise knows nothing about the tunnel.
-	tunnelPairing atomic.Pointer[TunnelPairing]
-
 	// agent factory state (resolved once at start)
 	sender   agent.Sender
 	model    string
@@ -908,7 +903,6 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/session-groups/{id}", s.handleUpdateSessionGroup)
 	s.api("DELETE /api/session-groups/{id}", s.handleDeleteSessionGroup)
 	s.api("GET /api/fs/list", s.handleFsList)
-	s.api("GET /api/tunnel/pairing", s.handleTunnelPairing)
 	if s.cfg.Native != nil {
 		// Desktop build only: OS-native capabilities. Absent under `octo serve`.
 		s.api("POST /api/native/pick-folder", s.handleNativePickFolder)
@@ -1561,8 +1555,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // writeJSONGzip is writeJSON for large payloads: gzipped when the client
 // accepts it. A long session's transcript runs to several MB of JSON that
 // gzips ~3–4× smaller, and a phone on a mobile network pays for every byte on
-// each reload. The tunnel bridge drops the phone's Accept-Encoding, so its
-// loopback client negotiates (and transparently undoes) gzip on its own.
+// each reload.
 func writeJSONGzip(w http.ResponseWriter, r *http.Request, status int, v any) {
 	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		writeJSON(w, status, v)

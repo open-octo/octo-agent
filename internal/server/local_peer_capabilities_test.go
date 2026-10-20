@@ -11,8 +11,7 @@ import (
 
 // The three capabilities gated on being the local machine, each checked against
 // a request that reaches the server over loopback but did not originate there —
-// the shape octo's own tunnel bridge sends. Each of these was reachable by a
-// paired phone before the marker existed.
+// the shape a port-forwarding tunnel such as cloudflared sends.
 
 // A relayed peer must not drive the host's OS dialogs, however well it
 // authenticates. Authenticating is what gets it past requireAuth to the
@@ -37,7 +36,7 @@ func TestNativeRoutes_RefuseARelayedPeer(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 			req.RemoteAddr = "127.0.0.1:50000" // the bridge dials loopback
 			req.Host = "127.0.0.1:8088"        // …under a loopback Host
-			req.Header.Set(HeaderForwarded, "relay")
+			req.Header.Set("X-Forwarded-For", "203.0.113.7")
 			req.Header.Set("Authorization", "Bearer "+srv.AccessKey())
 			w := httptest.NewRecorder()
 			srv.mux.ServeHTTP(w, req)
@@ -78,7 +77,6 @@ func TestWSUpgrade_RelayedConnectionIsNotLoopback(t *testing.T) {
 		want bool
 	}{
 		{"direct localhost browser", nil, "127.0.0.1:8088", true},
-		{"octo tunnel", map[string]string{HeaderForwarded: "relay"}, "127.0.0.1:8088", false},
 		{"behind a proxy", map[string]string{"X-Forwarded-For": "203.0.113.7"}, "127.0.0.1:8088", false},
 		{"public host passed through", nil, "x.ngrok-free.app", false},
 	}

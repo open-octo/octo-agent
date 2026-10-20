@@ -1,8 +1,6 @@
 <script lang="ts">
-  // Connection state, bound to the shared ws stores. The full "connected to
-  // <host>, N sessions" form and the push-woken offline flow arrive with the
-  // managed tunnel (M1); for now this reflects the live socket state so the feed
-  // never silently shows stale data as if live.
+  // Connection state, bound to the shared ws stores. It reflects the live
+  // socket state so the feed never silently shows stale data as if live.
   import { wsState, wsReconnect } from '../lib/ws'
   import { t } from '../lib/i18n'
 

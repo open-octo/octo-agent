@@ -4,7 +4,6 @@
   import Switch from '../ui/Switch.svelte'
   import EndpointsSection from '../settings/EndpointsSection.svelte'
   import ProfilesSection from '../settings/ProfilesSection.svelte'
-  import QrCode from '../ui/QrCode.svelte'
   import FileRecallView from '../../views/FileRecallView.svelte'
   import ProfileView from '../../views/ProfileView.svelte'
   import { get } from 'svelte/store'
@@ -62,7 +61,7 @@
   let upgradeMode   = $state<'cli' | 'installer'>('cli')
   let loading       = $state(true)
 
-  let cat = $state<'general' | 'endpoints' | 'agent' | 'mobile' | 'experimental' | 'data' | 'about'>('general')
+  let cat = $state<'general' | 'endpoints' | 'agent' | 'experimental' | 'data' | 'about'>('general')
   let modalEl = $state<HTMLDivElement | null>(null)
 
   // 数据管理 has its own two-level nav — a list of managed things, and one
@@ -221,10 +220,6 @@
     }
   }
 
-  // Managed-tunnel pairing material (null until fetched; .enabled false when
-  // the server was not started with --tunnel).
-  let tunnelPairing = $state<api.TunnelPairing | null>(null)
-
   // ── Agent defaults — each control saves immediately on change (see the
   // save* functions below), no separate Save button.
   let reasoningEffort  = $state('off')
@@ -247,7 +242,6 @@
     { key: 'general',   icon: 'ant-design:sliders-outlined',       label: 'settings.general' },
     { key: 'endpoints', icon: 'ant-design:api-outlined',           label: 'settings.endpoints.title' },
     { key: 'agent',     icon: 'ant-design:robot-outlined',         label: 'settings.agent' },
-    { key: 'mobile',    icon: 'ant-design:mobile-outlined',        label: 'settings.mobile' },
     // Experimental features (computer-use) need a platform with a substrate —
     // macOS (AX/CGEvent) or Windows (UI Automation/SendInput) on the machine
     // running octo. Shown on web too: a CLI/serve octo works the same, its
@@ -275,7 +269,6 @@
       loadConfig()
       loadVersion()
       if (get(nativeShell)) api.getAutostart().then(v => (autostart = v)).catch(() => {})
-      api.getTunnelPairing().then(p => { tunnelPairing = p }).catch(() => {})
       theme = modeToThemeLabel[getMode()] ?? 'Light'
       fontSize = storedFontSize()
       modalEl?.focus()
@@ -358,16 +351,6 @@
       }
     } finally {
       checkingUpdate = false
-    }
-  }
-
-  async function copyPairURL() {
-    if (!tunnelPairing?.pair_url) return
-    try {
-      await navigator.clipboard.writeText(tunnelPairing.pair_url)
-      showToast($t('settings.mobile.copied'), 'success')
-    } catch {
-      showToast('Copy failed', 'error')
     }
   }
 
@@ -650,23 +633,6 @@
             </div>
           </div>
 
-        {:else if cat === 'mobile'}
-          {#if tunnelPairing?.enabled && tunnelPairing.pair_url}
-            <div class="mobile-pair">
-              <QrCode text={tunnelPairing.pair_url} />
-              <div class="mobile-info">
-                <p class="mobile-scan">{$t('settings.mobile.scan')}</p>
-                <div class="mobile-meta mono">
-                  <div>{$t('settings.mobile.relay')}: {tunnelPairing.relay}</div>
-                  <div>{$t('settings.mobile.tunnel_id')}: {tunnelPairing.tunnel_id}</div>
-                </div>
-                <button class="btns" onclick={copyPairURL}>{$t('settings.mobile.copy_url')}</button>
-              </div>
-            </div>
-          {:else}
-            <div class="mobile-disabled">{$t('settings.mobile.disabled')}</div>
-          {/if}
-
         {:else if cat === 'data'}
           {#if dataSubView === 'none'}
             <!-- Memory leads: it's the row users come here to edit, while the
@@ -926,14 +892,6 @@ select.sinput { cursor: pointer; }
 /* ── about card ────────────────────────────────────────────────────────────── */
 .card2 { background: var(--bg-container); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
 
-/* ── mobile ─────────────────────────────────────────────────────────────────── */
-.mobile-pair { display: flex; gap: 20px; padding: 6px 2px; align-items: flex-start; flex-wrap: wrap; }
-.mobile-info { display: flex; flex-direction: column; gap: 12px; min-width: 0; flex: 1; }
-.mobile-scan { margin: 0; font-size: 14px; color: var(--text); }
-.mobile-meta { font-size: 12px; color: var(--text-tertiary); display: flex; flex-direction: column; gap: 4px; word-break: break-all; }
-.mobile-meta > div { min-width: 0; }
-.mobile-info .btns { align-self: flex-start; }
-.mobile-disabled { padding: 28px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
 .mono { font-family: var(--font-mono); }
 
 @media (max-width: 640px) {

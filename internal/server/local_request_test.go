@@ -73,11 +73,6 @@ func TestIsLocalRequest(t *testing.T) {
 		{"Forwarded", "http://127.0.0.1:8088/api/version", "127.0.0.1:50000",
 			map[string]string{"Forwarded": "for=203.0.113.7"}, false},
 
-		// octo's own managed tunnel, which drops the phone's Host and dials
-		// loopback — the marker its bridge stamps is the only difference.
-		{"octo tunnel marker", "http://127.0.0.1:8088/api/version", "127.0.0.1:50000",
-			map[string]string{HeaderForwarded: "relay"}, false},
-
 		// DNS rebinding: an attacker domain resolving to 127.0.0.1 is not local.
 		{"foreign host", "http://attacker.example:8088/api/version", "127.0.0.1:50000", nil, false},
 	}
@@ -126,7 +121,6 @@ func TestHandleVersion_LocalFlag(t *testing.T) {
 
 	check("direct", nil, true)
 	check("behind a proxy", map[string]string{"X-Forwarded-For": "203.0.113.7"}, false)
-	check("octo tunnel", map[string]string{HeaderForwarded: "relay"}, false)
 }
 
 // The unauthenticated loopback exemption is the highest-stakes consumer: a
@@ -153,18 +147,10 @@ func TestRequireAuth_ForwardedRequestLosesExemption(t *testing.T) {
 
 	// A forwarded request that DOES carry the key is fine — the key is the
 	// gate for remote peers, and narrowing the exemption must not break it.
-	// This is the shape octo's own tunnel bridge sends (its marker plus the
-	// host's key), so it is also the regression test for phones across the
-	// relay: they must authenticate, while still not counting as local.
 	w := authRequest(t, srv, http.MethodGet, "http://127.0.0.1:8088/api/sessions", "127.0.0.1:50000",
 		map[string]string{"X-Forwarded-For": "203.0.113.7", "X-Access-Key": testAccessKey})
 	if w.Code != http.StatusOK {
 		t.Errorf("forwarded request with a valid key: got %d, want 200", w.Code)
-	}
-	w = authRequest(t, srv, http.MethodGet, "http://127.0.0.1:8088/api/sessions", "127.0.0.1:50000",
-		map[string]string{HeaderForwarded: "relay", "X-Access-Key": testAccessKey})
-	if w.Code != http.StatusOK {
-		t.Errorf("tunnel-shaped request with a valid key: got %d, want 200", w.Code)
 	}
 }
 
