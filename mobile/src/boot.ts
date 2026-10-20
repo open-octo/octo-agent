@@ -153,7 +153,24 @@ async function showConnectScreen(): Promise<void> {
   document.body.appendChild(overlay)
 }
 
+// iOS zooms the page in when an input under 16px takes focus (the connect
+// field, the chat composer) and the WebView keeps that zoom, leaving the app
+// wider than the screen. maximum-scale=1 stops the focus zoom; iOS still lets
+// the user pinch-zoom. Applied here so the desktop web UI is unaffected.
+function pinViewportScale(): void {
+  const meta = document.querySelector('meta[name=viewport]')
+  if (meta && !/maximum-scale/.test(meta.getAttribute('content') ?? '')) {
+    meta.setAttribute('content', `${meta.getAttribute('content')}, maximum-scale=1`)
+  }
+}
+
 // ── entry ─────────────────────────────────────────────────────────────────
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', pinViewportScale, { once: true })
+} else {
+  pinViewportScale()
+}
+
 const saved = loadConnection()
 if (saved) {
   installShim(saved)
