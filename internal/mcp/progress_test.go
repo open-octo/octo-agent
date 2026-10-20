@@ -238,11 +238,12 @@ func TestCallToolProgress_IgnoresUnknownToken(t *testing.T) {
 	}
 }
 
-func TestProgressKey_AcceptsStringOrInteger(t *testing.T) {
+func TestProgressKey(t *testing.T) {
 	if got := progressKey(json.RawMessage(`"progress-7"`)); got != "progress-7" {
 		t.Errorf("string token -> %q", got)
 	}
-	if got := progressKey(json.RawMessage(` 7 `)); got != "7" {
-		t.Errorf("integer token -> %q", got)
+	// An integer is a valid token in general, just never one of ours.
+	if got := progressKey(json.RawMessage(`7`)); got != "" {
+		t.Errorf("integer token -> %q, want no key", got)
 	}
 }

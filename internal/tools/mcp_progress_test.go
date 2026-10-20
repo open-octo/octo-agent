@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +35,12 @@ func TestProgressLines(t *testing.T) {
 		if got := progressLines(c.p); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
+	}
+
+	huge := strings.Repeat("line\n", 10*maxProgressLines) + "last"
+	got := progressLines(mcp.ProgressParams{Progress: 1, Message: huge})
+	if len(got) != maxProgressLines || got[len(got)-1] != "last" {
+		t.Errorf("huge message: %d lines ending %q, want the last %d", len(got), got[len(got)-1], maxProgressLines)
 	}
 }
 

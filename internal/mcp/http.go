@@ -188,10 +188,11 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		req.Header.Set("Mcp-Session-Id", sentSession)
 	}
 	t.protoMu.Lock()
-	if t.protocolVersion != "" {
-		req.Header.Set("MCP-Protocol-Version", t.protocolVersion)
-	}
+	sentVersion := t.protocolVersion
 	t.protoMu.Unlock()
+	if sentVersion != "" {
+		req.Header.Set("MCP-Protocol-Version", sentVersion)
+	}
 
 	// Bearer-token injection from OAuth provider, if configured.
 	if t.oauth != nil {
@@ -219,9 +220,14 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		}
 	}()
 
+	// The session this response belongs to: what we sent, unless the server
+	// rotated it just now.
+	stream := streamSession{id: sentSession, version: sentVersion}
+
 	// Capture session id on first response (and tolerate the server
 	// rotating it on subsequent calls — spec lets them).
 	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
+		stream.id = sid
 		t.sessionMu.Lock()
 		t.sessionID = sid
 		t.sessionMu.Unlock()
@@ -287,7 +293,7 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		keepBody = true
 		return false, func() error {
 			defer resp.Body.Close()
-			return t.readSSE(ctx, resp.Body, msg.ID)
+			return t.readSSE(ctx, resp.Body, msg.ID, stream)
 		}, nil
 	default:
 		return false, nil, fmt.Errorf("mcp: http: unsupported response Content-Type %q (expected application/json or text/event-stream)", ct)
@@ -329,10 +335,48 @@ const maxSSEResumeAttempts = 3
 // ErrSessionExpired reports that the server no longer recognises the session
 // id we were using — it answered 404 to a request that carried one, which is
 // how the spec has a server say a session is gone (idle timeout, restart).
-// The transport has already dropped the dead id by the time this surfaces.
-// Client.Call watches for it and recovers by re-running the handshake and
-// replaying the request once; callers of Call therefore never normally see it.
+// Answering a request, the transport has already dropped the dead id by the
+// time this surfaces; found on a response stream it is a *streamExpiredError
+// instead, dropped later under the client's send slot. Client.Call watches
+// for it and recovers by re-running the handshake and replaying the request
+// once; callers of Call therefore never normally see it.
 var ErrSessionExpired = errors.New("mcp: session expired")
+
+// streamSession is the session a response stream belongs to. A resume
+// request carries it, not whatever is current: by then another sender may
+// have replaced the session, and the stream cannot continue on a different
+// one.
+type streamSession struct {
+	id, version string
+}
+
+// streamExpiredError is ErrSessionExpired found while reading a response
+// stream — after the client released its send slot, so the transport does
+// not clear the session itself: another sender would then go out with no
+// session id, which a server rejects outright rather than with the 404 that
+// lets it recover. It names the dead session for ForgetExpired instead.
+type streamExpiredError struct {
+	session string
+	detail  string
+}
+
+func (e *streamExpiredError) Error() string { return ErrSessionExpired.Error() + ": " + e.detail }
+func (e *streamExpiredError) Unwrap() error { return ErrSessionExpired }
+
+// ForgetExpired drops the session a *streamExpiredError names if it is still
+// the current one, and reports whether a recovery handshake is needed: false
+// when another sender has already replaced it. The client calls it holding
+// its send slot, so no request can go out between the forgetting and the
+// handshake that follows.
+func (t *HTTPTransport) ForgetExpired(err error) bool {
+	var se *streamExpiredError
+	if errors.As(err, &se) {
+		t.forgetSession(se.session)
+	}
+	t.sessionMu.Lock()
+	defer t.sessionMu.Unlock()
+	return t.sessionID == ""
+}
 
 // sessionDeleteTimeout bounds the best-effort session-termination DELETE that
 // Close fires. Short on purpose: Close runs on teardown paths (process exit,
@@ -370,12 +414,12 @@ var maxSSEEventBytes = 16 * 1024 * 1024
 // A stream that dies before delivering the response is resumed rather than
 // failed, provided the server opted into resumability by tagging events with
 // id: — see resumeSSE.
-func (t *HTTPTransport) readSSE(ctx context.Context, body io.Reader, wantID []byte) error {
+func (t *HTTPTransport) readSSE(ctx context.Context, body io.Reader, wantID []byte, stream streamSession) error {
 	lastID, err := t.scanSSE(ctx, body, wantID)
 	if !errors.Is(err, errSSEIncomplete) {
 		return err
 	}
-	return t.resumeSSE(ctx, wantID, lastID, err)
+	return t.resumeSSE(ctx, wantID, lastID, err, stream)
 }
 
 // resumeSSE picks up a response stream that broke before answering. The spec's
@@ -386,12 +430,12 @@ func (t *HTTPTransport) readSSE(ctx context.Context, body io.Reader, wantID []by
 // events hasn't opted in and has no way to know where to restart, so there the
 // original failure stands. Attempts are capped — a server that keeps dropping
 // the stream is broken, and retrying forever would just hide that.
-func (t *HTTPTransport) resumeSSE(ctx context.Context, wantID []byte, lastID string, cause error) error {
+func (t *HTTPTransport) resumeSSE(ctx context.Context, wantID []byte, lastID string, cause error, stream streamSession) error {
 	for attempt := 0; attempt < maxSSEResumeAttempts; attempt++ {
 		if lastID == "" {
 			break
 		}
-		body, err := t.openResumeStream(ctx, lastID)
+		body, err := t.openResumeStream(ctx, lastID, stream)
 		if err != nil {
 			// An expiry discovered here must stay recognisable: it's the one
 			// failure the Client can repair, and burying it under the
@@ -418,7 +462,7 @@ func (t *HTTPTransport) resumeSSE(ctx context.Context, wantID []byte, lastID str
 
 // openResumeStream issues the spec's replay request: a GET on the endpoint
 // with Last-Event-ID set, asking the server to continue an interrupted stream.
-func (t *HTTPTransport) openResumeStream(ctx context.Context, lastID string) (io.ReadCloser, error) {
+func (t *HTTPTransport) openResumeStream(ctx context.Context, lastID string, stream streamSession) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.url, nil)
 	if err != nil {
 		return nil, err
@@ -428,17 +472,13 @@ func (t *HTTPTransport) openResumeStream(ctx context.Context, lastID string) (io
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
 	}
-	t.sessionMu.Lock()
-	sid := t.sessionID
-	t.sessionMu.Unlock()
+	sid := stream.id
 	if sid != "" {
 		req.Header.Set("Mcp-Session-Id", sid)
 	}
-	t.protoMu.Lock()
-	if t.protocolVersion != "" {
-		req.Header.Set("MCP-Protocol-Version", t.protocolVersion)
+	if stream.version != "" {
+		req.Header.Set("MCP-Protocol-Version", stream.version)
 	}
-	t.protoMu.Unlock()
 	if t.oauth != nil {
 		tok, terr := t.oauth.Token(ctx)
 		if terr != nil {
@@ -458,12 +498,11 @@ func (t *HTTPTransport) openResumeStream(ctx context.Context, lastID string) (io
 		// server to close a response stream early, so this is a likely way for
 		// a resume to fail rather than an exotic one. Report it as the expiry
 		// it is — the caller propagates it so the Client re-handshakes — and
-		// not as "the stream broke", which would leave the dead session id in
-		// place and fail the call with an unrelated message.
-		t.forgetSession(sid)
+		// not as "the stream broke", which would fail the call with an
+		// unrelated message and never replace the dead session.
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("%w: %s", ErrSessionExpired, bytes.TrimSpace(b))
+		return nil, &streamExpiredError{session: sid, detail: string(bytes.TrimSpace(b))}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))

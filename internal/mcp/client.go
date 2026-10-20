@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -86,11 +85,6 @@ type Client struct {
 	// queued callers could not be released by their own deadline or by an
 	// interrupt. Waiting on a channel lets them select on ctx instead.
 	sendSem chan struct{}
-
-	// sessionGen counts completed recovery handshakes. A sender whose stream
-	// died with the session compares it against the value it sent on, so
-	// several streams discovering the same expiry recover it once.
-	sessionGen atomic.Uint64
 
 	// onNotification, when set, receives server-initiated notifications by
 	// method name. Guarded because it's read from the receive loop and set
@@ -316,6 +310,15 @@ type streamStarter interface {
 	StartSend(ctx context.Context, msg *Message) (finish func() error, err error)
 }
 
+// expiryForgetter is implemented by a transport whose finish can report a
+// session expiry. ForgetExpired is called with that error while the send slot
+// is held: it drops the dead session if it is still the current one, and
+// reports whether a recovery handshake is needed — false when another sender
+// has already replaced the session.
+type expiryForgetter interface {
+	ForgetExpired(err error) (needHandshake bool)
+}
+
 // sendRecoveringSession is the single write path to the transport. The send
 // slot is held while msg is written and the response headers are read, so if
 // the server reports our session gone the recovery handshake and replay run
@@ -326,13 +329,16 @@ type streamStarter interface {
 // Holding it for the stream would serialise every other request to the
 // server — a list_changed refresh, a concurrent sub-agent's call — behind a
 // tool call that may run for many minutes while it reports progress. A
-// session that expires mid-stream (the resume request answers 404) is
-// recovered the same way, once the slot is taken back.
+// session that expires mid-stream (the resume request answers 404) is only
+// forgotten once the slot is taken back, and recovered right there: clearing
+// it any earlier would let other senders go out with no session at all,
+// which a server rejects outright instead of with the 404 that triggers
+// recovery.
 //
 // Each phase recovers at most once; a second expiry in a row is a server we
 // can't keep a session with, and returning the error beats looping.
 func (c *Client) sendRecoveringSession(ctx context.Context, msg *Message) error {
-	gen, finish, err := c.startSend(ctx, msg, false, 0)
+	finish, err := c.startSend(ctx, msg, nil)
 	if err != nil || finish == nil {
 		return err
 	}
@@ -340,7 +346,7 @@ func (c *Client) sendRecoveringSession(ctx context.Context, msg *Message) error 
 	if !errors.Is(err, ErrSessionExpired) {
 		return err
 	}
-	_, finish, err = c.startSend(ctx, msg, true, gen)
+	finish, err = c.startSend(ctx, msg, err)
 	if err != nil || finish == nil {
 		return err
 	}
@@ -349,46 +355,50 @@ func (c *Client) sendRecoveringSession(ctx context.Context, msg *Message) error 
 
 // startSend runs the slot-held phase of a send: write msg and handle the
 // response headers, re-handshaking and replaying once if they report the
-// session expired. It returns the session generation msg went out on.
+// session expired.
 //
-// expired says the caller already knows the session gen is gone (its stream
-// died with it). The handshake is skipped if another sender has recovered
-// since — sessionGen has moved on — and msg is simply replayed.
+// expired, when non-nil, is the expiry msg's own stream died with. The dead
+// session is forgotten and replaced first — unless another sender already
+// replaced it, in which case msg is simply replayed on the new one.
 //
 // The handshake deliberately does NOT go back through Call/Notify: those
 // acquire the same slot, which isn't reentrant, so reusing them here would
 // deadlock. It talks to the transport directly instead — safe precisely because
 // we already hold the slot.
-func (c *Client) startSend(ctx context.Context, msg *Message, expired bool, gen uint64) (uint64, func() error, error) {
+func (c *Client) startSend(ctx context.Context, msg *Message, expired error) (func() error, error) {
 	// Another sender may be mid-recovery, so a waiting caller must be able to
 	// give up on its own deadline rather than only when the holder finishes.
 	select {
 	case c.sendSem <- struct{}{}:
 	case <-ctx.Done():
-		return 0, nil, ctx.Err()
+		return nil, ctx.Err()
 	case <-c.rxDone:
-		return 0, nil, fmt.Errorf("mcp: connection is no longer readable while waiting to send")
+		return nil, fmt.Errorf("mcp: connection is no longer readable while waiting to send")
 	}
 	defer func() { <-c.sendSem }()
 
-	if expired && c.sessionGen.Load() == gen {
-		if rerr := c.rehandshakeLocked(ctx); rerr != nil {
-			return 0, nil, fmt.Errorf("%w (recovery handshake failed: %v)", ErrSessionExpired, rerr)
+	if expired != nil {
+		need := true
+		if f, ok := c.transport.(expiryForgetter); ok {
+			need = f.ForgetExpired(expired)
 		}
+		if need {
+			if rerr := c.rehandshakeLocked(ctx); rerr != nil {
+				return nil, fmt.Errorf("%w (recovery handshake failed: %v)", expired, rerr)
+			}
+		}
+		return c.writeLocked(ctx, msg)
 	}
-	gen = c.sessionGen.Load()
 	finish, err := c.writeLocked(ctx, msg)
-	if expired || !errors.Is(err, ErrSessionExpired) {
-		return gen, finish, err
+	if !errors.Is(err, ErrSessionExpired) {
+		return finish, err
 	}
 	if rerr := c.rehandshakeLocked(ctx); rerr != nil {
 		// Report the original expiry as the cause — that's what the caller
 		// needs to understand — with the recovery failure as context.
-		return 0, nil, fmt.Errorf("%w (recovery handshake failed: %v)", err, rerr)
+		return nil, fmt.Errorf("%w (recovery handshake failed: %v)", err, rerr)
 	}
-	gen = c.sessionGen.Load()
-	finish, err = c.writeLocked(ctx, msg)
-	return gen, finish, err
+	return c.writeLocked(ctx, msg)
 }
 
 // writeLocked sends msg, splitting off the read of a streamed response when
@@ -455,11 +465,7 @@ func (c *Client) rehandshakeLocked(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	if err := c.transport.Send(ctx, &Message{JSONRPC: "2.0", Method: MethodInitialized}); err != nil {
-		return err
-	}
-	c.sessionGen.Add(1)
-	return nil
+	return c.transport.Send(ctx, &Message{JSONRPC: "2.0", Method: MethodInitialized})
 }
 
 // SetNotificationHandler registers fn to receive server-initiated
@@ -546,15 +552,15 @@ func (c *Client) deliverProgress(m *Message) {
 	}
 }
 
-// progressKey normalises a token as it came back on the wire. Ours are always
-// sent as strings, but a server that echoes one as a bare integer still means
-// the same request.
+// progressKey decodes a token as it came back on the wire. The spec allows an
+// integer too, but ours are always "progress-N" strings, so anything that
+// isn't a string can't be one of them and maps to no key.
 func progressKey(raw json.RawMessage) string {
 	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
 	}
-	return string(bytes.TrimSpace(raw))
+	return s
 }
 
 func (c *Client) deliverResponse(m *Message) {

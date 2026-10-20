@@ -208,6 +208,9 @@ func executeMCP(ctx context.Context, name string, input map[string]any, progress
 // chunk per line; the count is appended only when a total makes it a
 // fraction, since a bare ever-increasing counter on every output line is
 // noise. A report with no message shows just the count.
+// maxProgressLines caps the lines one progress report turns into.
+const maxProgressLines = 200
+
 func progressLines(p mcp.ProgressParams) []string {
 	count := strconv.FormatFloat(p.Progress, 'f', -1, 64)
 	if p.Total != nil {
@@ -218,6 +221,12 @@ func progressLines(p mcp.ProgressParams) []string {
 		return []string{"progress " + count}
 	}
 	lines := strings.Split(strings.ReplaceAll(msg, "\r\n", "\n"), "\n")
+	// Each line becomes its own progress event; a server dumping a huge
+	// message would otherwise flood every surface with them. The tail is what
+	// a live view would be showing anyway.
+	if n := len(lines) - maxProgressLines; n > 0 {
+		lines = lines[n:]
+	}
 	for i, line := range lines {
 		// A lone \r is a progress bar redrawing its own line; only what a
 		// terminal would end up showing — the last segment — is kept.

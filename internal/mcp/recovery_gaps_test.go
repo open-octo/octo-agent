@@ -229,9 +229,10 @@ func TestSSEMidStreamExpiry_RecoversAndClearsSession(t *testing.T) {
 }
 
 // TestSSEMidStreamExpiry_SurfacesTypedError checks the transport-level
-// contract directly: the resume 404 becomes ErrSessionExpired and the dead
-// session id is dropped, rather than an opaque stream failure that leaves it
-// installed.
+// contract directly: the resume 404 becomes ErrSessionExpired rather than an
+// opaque stream failure. The dead session id stays installed until the client,
+// holding its send slot, calls ForgetExpired — dropping it from the stream
+// reader would let other senders go out with no session at all.
 func TestSSEMidStreamExpiry_SurfacesTypedError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -261,11 +262,35 @@ func TestSSEMidStreamExpiry_SurfacesTypedError(t *testing.T) {
 		t.Errorf("err = %v, want it to wrap ErrSessionExpired", err)
 	}
 
-	tx.sessionMu.Lock()
-	sid := tx.sessionID
-	tx.sessionMu.Unlock()
-	if sid != "" {
-		t.Errorf("session id = %q after an expiry, want it dropped", sid)
+	session := func() string {
+		tx.sessionMu.Lock()
+		defer tx.sessionMu.Unlock()
+		return tx.sessionID
+	}
+	if sid := session(); sid != "sess-A" {
+		t.Errorf("session id = %q right after the stream expired, want it kept until ForgetExpired", sid)
+	}
+	if !tx.ForgetExpired(err) {
+		t.Error("ForgetExpired on the current session should ask for a handshake")
+	}
+	if sid := session(); sid != "" {
+		t.Errorf("session id = %q after ForgetExpired, want it dropped", sid)
+	}
+}
+
+// A stream's expiry must not clobber a session another sender has already
+// established in its place — the stream only knows its own session is dead.
+func TestForgetExpired_KeepsReplacementSession(t *testing.T) {
+	tx, _ := NewHTTPTransport(HTTPConfig{URL: "http://unused.invalid"})
+	defer tx.Close()
+	tx.sessionID = "sess-new"
+	tx.SetProtocolVersion("2025-03-26")
+
+	if tx.ForgetExpired(&streamExpiredError{session: "sess-old"}) {
+		t.Error("asked for a handshake though the session was already replaced")
+	}
+	if tx.sessionID != "sess-new" || tx.protocolVersion != "2025-03-26" {
+		t.Errorf("replacement session clobbered: id=%q version=%q", tx.sessionID, tx.protocolVersion)
 	}
 }
 
