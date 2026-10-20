@@ -1,5 +1,5 @@
 import { installShim } from './shim'
-import { clearConnection, loadConnection, parseConnectLink, saveConnection, type Connection } from './connection'
+import { loadConnection, parseConnectLink, saveConnection, type Connection } from './connection'
 import { scanConnectLink } from './qr'
 
 // boot is octo-mobile's entry point. It is bundled to a classic script and
@@ -32,17 +32,12 @@ const text = zh
       failed: (msg: string) => `Connection failed: ${msg}`,
     }
 
-// window.octoMobile lets the mobile UI (web/src/mobile) show which server it is
-// on and switch to another, without importing anything from this project.
+// window.octoMobile tells the mobile UI (web/src/mobile) which server it is on,
+// without importing anything from this project: page URLs must name it.
 declare global {
   interface Window {
-    octoMobile?: { server: string; disconnect(): void }
+    octoMobile?: { server: string }
   }
-}
-
-function disconnect(): void {
-  clearConnection()
-  location.reload()
 }
 
 // check probes a gated endpoint, so a wrong key shows as 401 rather than
@@ -174,7 +169,7 @@ if (document.readyState === 'loading') {
 const saved = loadConnection()
 if (saved) {
   installShim(saved)
-  window.octoMobile = { server: saved.base, disconnect }
+  window.octoMobile = { server: saved.base }
 } else {
   void showConnectScreen()
 }

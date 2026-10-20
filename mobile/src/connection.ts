@@ -47,11 +47,3 @@ export function loadConnection(): Connection | null {
 export function saveConnection(c: Connection): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(c))
 }
-
-export function clearConnection(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY)
-  } catch {
-    // ignore
-  }
-}

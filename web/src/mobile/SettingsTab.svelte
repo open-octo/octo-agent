@@ -1,11 +1,10 @@
 <script lang="ts">
-  // Settings tab: device (connection state), preferences (notifications,
-  // appearance), and about (version). Reuses the shared theme + notification
+  // Settings tab: preferences (notifications, appearance) and about
+  // (version). The connection state lives on the feed's banner. Reuses the shared theme + notification
   // stores; appearance switches the app-wide data-theme so it also flips the
   // mobile UI's dark tokens live.
   import { notificationsEnabled, setNotificationsEnabled } from '../lib/notifications'
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
-  import { wsState } from '../lib/ws'
   import { t } from '../lib/i18n'
 
   let mode = $state<ThemeMode>(getMode())
@@ -19,13 +18,6 @@
     setMode(m)
   }
 
-  // The app's boot layer (mobile/src/boot.ts) publishes the server it is
-  // connected to and a way to forget it.
-  const app = typeof window !== 'undefined'
-    ? (window as unknown as { octoMobile?: { server: string; disconnect(): void } }).octoMobile
-    : undefined
-  const server = app?.server.replace(/^https?:\/\//, '') ?? ''
-
   let version = $state('')
   $effect(() => {
     fetch('/api/version')
@@ -38,18 +30,6 @@
 <header class="head"><h1>{$t('m.tab_settings')}</h1></header>
 
 <div class="scroll">
-  <div class="card device">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-accent)" stroke-width="2"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/></svg>
-    <div class="dinfo">
-      <span class="dname">{$t('m.dev_connected')}</span>
-      {#if server}<span class="dserver mono">{server}</span>{/if}
-    </div>
-    <span class="dot" class:live={$wsState === 'connected'}></span>
-  </div>
-  {#if app}
-    <button class="card switch-server" onclick={() => app.disconnect()}>{$t('m.switch_server')}</button>
-  {/if}
-
   <p class="lbl">{$t('m.prefs')}</p>
   <div class="card group">
     <div class="row">
@@ -87,16 +67,6 @@
   .head h1 { margin: 0; font-size: 24px; font-weight: 600; color: var(--m-text-strong); }
   .scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 16px 20px; }
   .card { background: var(--m-surface); border-radius: 14px; box-shadow: var(--m-shadow-card); }
-  .device { display: flex; align-items: center; gap: 10px; padding: 14px 16px; margin-bottom: 14px; }
-  .device .dinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .device .dname { font-size: 14.5px; font-weight: 600; color: var(--m-text); }
-  .device .dserver { font-size: 12px; color: var(--m-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .switch-server {
-    display: block; width: 100%; margin: -6px 0 14px; padding: 12px 16px; border: 0; text-align: left;
-    font: inherit; font-size: 14px; color: var(--m-accent); cursor: pointer;
-  }
-  .device .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--m-text-4); }
-  .device .dot.live { background: var(--m-success); }
   .lbl { margin: 2px 2px 8px; font: 600 12px/1 system-ui; letter-spacing: .5px; text-transform: uppercase; color: var(--m-text-3); }
   .group { overflow: hidden; margin-bottom: 20px; }
   .row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }

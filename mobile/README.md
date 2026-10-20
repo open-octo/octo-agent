@@ -29,8 +29,8 @@ Connecting takes the bootstrap link `octo serve` prints on startup
 (`http://<host>:8088/?access_key=…`). Settings › Mobile on the desktop/web UI
 shows it as a QR, with the server's LAN addresses to pick from or any other
 address typed in. On first launch the app scans it (or takes it pasted), checks
-it against the server, saves it, and reloads. Settings › "Switch server" in the
-app forgets it.
+it against the server, saves it, and reloads. To point the app at another
+server, clear its data.
 
 There are no push notifications: the app syncs when it is opened.
 
