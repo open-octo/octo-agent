@@ -38,6 +38,11 @@ type mobileConnectInfo struct {
 // or a genuinely local browser.
 func (s *Server) handleMobileConnect(w http.ResponseWriter, r *http.Request) {
 	urls, loopbackOnly := reachableURLs(s.cfg.Addr)
+	// Never null: the settings page spreads the list, and a loopback bind
+	// (the desktop app's default) has no addresses to offer.
+	if urls == nil {
+		urls = []string{}
+	}
 	writeJSON(w, http.StatusOK, mobileConnectInfo{
 		AccessKey:    s.accessKey,
 		URLs:         urls,

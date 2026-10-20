@@ -76,6 +76,9 @@ func TestHandleMobileConnect(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("local: status = %d, want 200 (%s)", w.Code, strings.TrimSpace(w.Body.String()))
 	}
+	if !strings.Contains(w.Body.String(), `"urls":[]`) {
+		t.Errorf("loopback bind: body = %s, want urls as an empty array, not null", strings.TrimSpace(w.Body.String()))
+	}
 	var got mobileConnectInfo
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
