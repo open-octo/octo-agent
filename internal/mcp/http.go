@@ -46,8 +46,6 @@ import (
 //   - A standing GET listener for server-initiated messages outside of a
 //     request/response cycle. The GET above is only used to resume a broken
 //     response stream.
-//   - Bidirectional concurrent sends. The client serialises one request at
-//     a time anyway.
 //
 // Receive is wired through an in-memory channel: each Send queues the
 // frame(s) decoded from its response, Receive pops the next one. This
@@ -109,9 +107,9 @@ func NewHTTPTransport(cfg HTTPConfig) (*HTTPTransport, error) {
 		headers: cfg.Headers,
 		oauth:   cfg.OAuth,
 		hc:      &http.Client{},
-		// 16 is generous — the synchronous Send/Receive pattern only ever
-		// has one outstanding response, but headroom protects against any
-		// pipelining we might add later.
+		// Several response streams can be open at once (one per in-flight
+		// request); the receive loop drains this continuously, so 16 is
+		// only smoothing, not a bound anything depends on.
 		inbox: make(chan *Message, 16),
 		done:  make(chan struct{}),
 	}, nil
@@ -126,39 +124,54 @@ func NewHTTPTransport(cfg HTTPConfig) (*HTTPTransport, error) {
 // access token; a 401 response invalidates the cache and triggers exactly
 // one retry (so the user doesn't see two authorization prompts in a row).
 func (t *HTTPTransport) Send(ctx context.Context, msg *Message) error {
+	finish, err := t.StartSend(ctx, msg)
+	if err != nil || finish == nil {
+		return err
+	}
+	return finish()
+}
+
+// StartSend is Send split at the response headers: it returns once those are
+// handled, with a plain-JSON response already queued. For an SSE response it
+// returns finish, which reads the stream (and resumes it if it breaks) and
+// must be called exactly once — it also closes the body. ctx keeps governing
+// the stream after StartSend returns.
+func (t *HTTPTransport) StartSend(ctx context.Context, msg *Message) (finish func() error, err error) {
 	if t.closed.Load() {
-		return errors.New("mcp: http transport: closed")
+		return nil, errors.New("mcp: http transport: closed")
 	}
 
 	// At most one retry on 401 — the retry uses a freshly-acquired token.
 	for attempt := 0; attempt < 2; attempt++ {
-		retry, err := t.doRequest(ctx, msg, attempt > 0)
+		retry, finish, err := t.doRequest(ctx, msg, attempt > 0)
 		if !retry {
-			return err
+			return finish, err
 		}
 		// retry==true means 401 was observed; loop to retry once.
 	}
-	return errors.New("mcp: http: still unauthorized after retry")
+	return nil, errors.New("mcp: http: still unauthorized after retry")
 }
 
-// doRequest performs one HTTP round-trip. Returns (retry, err):
+// doRequest performs one HTTP round-trip up to the response body. Returns
+// (retry, finish, err):
 //
 //   - retry=true means "401 observed, OAuth was invalidated, caller should
 //     loop one more time with a freshly-acquired token". err is non-nil
 //     here but only as breadcrumb context.
 //   - retry=false means "this attempt is terminal — either the response
-//     was queued for Receive or err describes a hard failure".
+//     was queued for Receive, finish will read it, or err describes a hard
+//     failure".
 //
 // forceFreshToken=true on the retry attempt forces a token refresh path
 // even if the cached token still looks unexpired.
-func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshToken bool) (retry bool, err error) {
+func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshToken bool) (retry bool, finish func() error, err error) {
 	body, err := json.Marshal(msg)
 	if err != nil {
-		return false, fmt.Errorf("mcp: marshal: %w", err)
+		return false, nil, fmt.Errorf("mcp: marshal: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
-		return false, fmt.Errorf("mcp: request: %w", err)
+		return false, nil, fmt.Errorf("mcp: request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// MCP spec: clients MUST include Accept with both JSON and SSE so the
@@ -187,7 +200,7 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		}
 		tok, terr := t.oauth.Token(ctx)
 		if terr != nil {
-			return false, fmt.Errorf("mcp: oauth token: %w", terr)
+			return false, nil, fmt.Errorf("mcp: oauth token: %w", terr)
 		}
 		if tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
@@ -196,9 +209,15 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 
 	resp, err := t.hc.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("mcp: do: %w", err)
+		return false, nil, fmt.Errorf("mcp: do: %w", err)
 	}
-	defer resp.Body.Close()
+	// Closed on return, except when the body is handed to finish.
+	keepBody := false
+	defer func() {
+		if !keepBody {
+			_ = resp.Body.Close()
+		}
+	}()
 
 	// Capture session id on first response (and tolerate the server
 	// rotating it on subsequent calls — spec lets them).
@@ -216,19 +235,19 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		// would queue nothing, leaving the caller to wait out its whole
 		// timeout for a response that is never coming. Name it instead.
 		if !msg.IsNotification() {
-			return false, fmt.Errorf("mcp: http 204 to a %s request: server must answer with JSON or an SSE stream", msg.Method)
+			return false, nil, fmt.Errorf("mcp: http 204 to a %s request: server must answer with JSON or an SSE stream", msg.Method)
 		}
-		return false, nil
+		return false, nil, nil
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		// If we have OAuth and this isn't already our second attempt, ask
 		// the caller to retry with a fresh token. The provider's
 		// Invalidate is what makes the next Token() do real work.
 		if t.oauth != nil && !forceFreshToken {
-			return true, errors.New("mcp: http 401, will retry")
+			return true, nil, errors.New("mcp: http 401, will retry")
 		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return false, fmt.Errorf("mcp: http 401: %s", bytes.TrimSpace(b))
+		return false, nil, fmt.Errorf("mcp: http 401: %s", bytes.TrimSpace(b))
 	}
 	if resp.StatusCode == http.StatusNotFound && sentSession != "" {
 		// A 404 answering a request that carried a session id is how the spec
@@ -239,11 +258,11 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		// through below.
 		t.forgetSession(sentSession)
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return false, fmt.Errorf("%w: %s", ErrSessionExpired, bytes.TrimSpace(b))
+		return false, nil, fmt.Errorf("%w: %s", ErrSessionExpired, bytes.TrimSpace(b))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return false, fmt.Errorf("mcp: http %d: %s", resp.StatusCode, bytes.TrimSpace(b))
+		return false, nil, fmt.Errorf("mcp: http %d: %s", resp.StatusCode, bytes.TrimSpace(b))
 	}
 
 	if msg.IsNotification() {
@@ -253,7 +272,7 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		// response, so there's nothing to decode or queue either way —
 		// drain the small ack body so the connection can be reused.
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return false, nil
+		return false, nil, nil
 	}
 
 	ct := resp.Header.Get("Content-Type")
@@ -261,13 +280,17 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 	case ct == "" || isJSONContentType(ct):
 		var m Message
 		if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-			return false, fmt.Errorf("mcp: decode response: %w", err)
+			return false, nil, fmt.Errorf("mcp: decode response: %w", err)
 		}
-		return false, t.queue(ctx, &m)
+		return false, nil, t.queue(ctx, &m)
 	case isEventStreamContentType(ct):
-		return false, t.readSSE(ctx, resp.Body, msg.ID)
+		keepBody = true
+		return false, func() error {
+			defer resp.Body.Close()
+			return t.readSSE(ctx, resp.Body, msg.ID)
+		}, nil
 	default:
-		return false, fmt.Errorf("mcp: http: unsupported response Content-Type %q (expected application/json or text/event-stream)", ct)
+		return false, nil, fmt.Errorf("mcp: http: unsupported response Content-Type %q (expected application/json or text/event-stream)", ct)
 	}
 }
 
