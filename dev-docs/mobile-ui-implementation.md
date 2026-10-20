@@ -23,7 +23,10 @@ architecture follows from that:
   app's own preferences and about.
 - The Sessions tab is a **status-card feed, not a message list** — cards are
   grouped by what they need from you (needs-reply, needs-approval, running,
-  done), not listed chronologically.
+  done), not listed chronologically. To-do and Active span projects; below
+  them a Projects section (the desktop sidebar's partition, task projects
+  included) opens each project's sessions, and Recent holds the done sessions
+  outside any project.
 - Approvals are **inline on the card** (approve / reject without opening a
   detail), and each activity opens a **typed detail view** (chat / approval /
   progress / result) rather than one uniform transcript.
