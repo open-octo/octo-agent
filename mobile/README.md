@@ -50,6 +50,15 @@ npm test          # vitest: connection + shim
 npm run typecheck # tsc
 ```
 
+## Install
+
+Android: every release carries `octo-android.apk` ([latest](https://github.com/open-octo/octo-agent/releases/latest/download/octo-android.apk)), built by
+the `android apk` job in `.github/workflows/release.yml` and signed with the
+release key held in the repo secrets (`ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`). Every release must be signed
+with that same key, or Android refuses to install it over the previous one.
+iOS: build it yourself, below.
+
 ## Build the app
 
 Android needs the Android SDK; iOS needs a Mac with Xcode.

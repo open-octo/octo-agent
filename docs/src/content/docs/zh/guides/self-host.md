@@ -80,8 +80,10 @@ octo serve -addr :8088 --access-key <key>
 
 ## 连接手机 App
 
-iOS / Android App（开发者预览，需从源码构建，见
-[`mobile/`](https://github.com/open-octo/octo-agent/tree/main/mobile)）直连这个服务，中间没有中继。
+iOS / Android App（开发者预览）直连这个服务，中间没有中继。Android 每个版本都附带
+[`octo-android.apk`](https://github.com/open-octo/octo-agent/releases/latest/download/octo-android.apk)，下载后直接安装（系统提示时允许浏览器安装应用）。iOS 需从源码构建，见
+[`mobile/`](https://github.com/open-octo/octo-agent/tree/main/mobile)。
+
 手机怎么连到服务，交给你的网络：
 
 - **同一局域网**：用 `octo serve -addr 0.0.0.0:8088` 启动。

@@ -15,6 +15,8 @@
 //   node scripts/wire-native.mjs            # wire whichever of ios/ android/ exist
 //   node scripts/wire-native.mjs --ios      # iOS only
 //   node scripts/wire-native.mjs --android  # Android only
+//   node scripts/wire-native.mjs --android --version 1.17.17
+//                                           # also stamp the app version (release CI)
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -24,7 +26,14 @@ const mobileRoot = fileURLToPath(new URL('..', import.meta.url))
 const iosRoot = join(mobileRoot, 'ios')
 const androidRoot = join(mobileRoot, 'android')
 
-const args = new Set(process.argv.slice(2))
+const argv = process.argv.slice(2)
+const args = new Set(argv)
+const versionAt = argv.indexOf('--version')
+const version = versionAt >= 0 ? argv[versionAt + 1] : ''
+if (versionAt >= 0 && !/^\d+\.\d+\.\d+$/.test(version ?? '')) {
+  console.error(`wire-native: --version wants X.Y.Z, got ${JSON.stringify(version)}`)
+  process.exit(1)
+}
 const onlyIos = args.has('--ios')
 const onlyAndroid = args.has('--android')
 const wantIos = onlyIos || !onlyAndroid
@@ -105,6 +114,27 @@ function wireAndroid() {
   }
 
   if (changed) writeFileSync(manifest, text)
+
+  if (version) stampAndroidVersion(version)
+}
+
+// stampAndroidVersion sets versionName to the release version and versionCode
+// to major*1e6 + minor*1e3 + patch, so every release installs over the last
+// (Android refuses an update whose versionCode is not higher).
+function stampAndroidVersion(v) {
+  const gradle = join(androidRoot, 'app', 'build.gradle')
+  const [major, minor, patch] = v.split('.').map(Number)
+  const code = major * 1_000_000 + minor * 1_000 + patch
+  const text = readFileSync(gradle, 'utf8')
+  const next = text
+    .replace(/versionCode\s+\d+/, `versionCode ${code}`)
+    .replace(/versionName\s+"[^"]*"/, `versionName "${v}"`)
+  if (!/versionCode\s+\d+/.test(text) || !/versionName\s+"/.test(text)) {
+    warn(`Android: versionCode/versionName not found in ${gradle}; set them to ${code} / "${v}" by hand.`)
+    return
+  }
+  writeFileSync(gradle, next)
+  did(`Android: version ${v} (versionCode ${code})`)
 }
 
 // ---------------------------------------------------------------- run

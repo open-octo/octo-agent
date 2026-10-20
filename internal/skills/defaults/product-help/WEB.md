@@ -57,7 +57,8 @@ not switch profiles: that restarts the backend, so it lives in the desktop tray 
 
 ## Settings → Mobile
 
-Pairs the mobile app (iOS / Android, developer preview, built from source) with this server. The app
+Pairs the mobile app (iOS / Android, developer preview; Android installs from `octo-android.apk`,
+https://github.com/open-octo/octo-agent/releases/latest/download/octo-android.apk — iOS builds from source) with this server. The app
 connects directly — no relay — so the phone must be able to reach the server: `octo serve -addr
 0.0.0.0:8088` for the LAN, or Tailscale / cloudflared / any tunnel in front. The panel lists the
 server's LAN addresses or takes any typed address, and shows a QR of `<address>/?access_key=<key>`;

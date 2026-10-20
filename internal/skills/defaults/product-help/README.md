@@ -16,7 +16,7 @@ data staying on the user's own machine. No Node / Python / Ruby runtime.
 - **IM bridge** — WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram, inside `octo serve`
 - **VS Code extension** and **Obsidian plugin** — connect to `octo serve` over the same HTTP/WS API
 
-The eighth, a mobile app (iOS / Android, developer preview, built from source), connects straight
+The eighth, a mobile app (iOS / Android, developer preview; Android APK on every release, iOS from source), connects straight
 to `octo serve` — see `WEB.md` › Settings → Mobile. On top of the agent loop: skills, MCP clients,
 OS-level sandboxing, persistent memory, sub-agents, expert agents, background workflows,
 Light Apps (reusable agent-generated HTML tools), and a task graph for autonomous

@@ -97,9 +97,13 @@ See the full boundary — what's defended, what's explicitly out of scope — in
 
 ## Connecting the mobile app
 
-The iOS / Android app (developer preview, built from source — see
-[`mobile/`](https://github.com/open-octo/octo-agent/tree/main/mobile)) connects straight to this
-server; there is no relay in between. Getting the phone to the server is your network's job:
+The iOS / Android app (developer preview) connects straight to this
+server; there is no relay in between. Android: every release carries
+[`octo-android.apk`](https://github.com/open-octo/octo-agent/releases/latest/download/octo-android.apk) to install directly (allow installs from your
+browser when Android asks). iOS builds from source — see
+[`mobile/`](https://github.com/open-octo/octo-agent/tree/main/mobile).
+
+Getting the phone to the server is your network's job:
 
 - **Same LAN** — start with `octo serve -addr 0.0.0.0:8088`.
 - **Anywhere else** — keep the loopback bind and put Tailscale (`tailscale serve`), cloudflared or any

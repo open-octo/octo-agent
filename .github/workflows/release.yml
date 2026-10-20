@@ -333,6 +333,75 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" Octo-${{ matrix.apparch }}.AppImage --clobber
 
+  # Build the Android app (octo-android.apk) and attach it, for users to
+  # download and install directly. It is the Capacitor shell around the web UI
+  # (mobile/), signed with the release key from the repo secrets: every
+  # release must carry the same signature, or Android refuses to install it
+  # over the previous one. The version comes from the tag (wire-native
+  # --version), so each release's versionCode is higher than the last.
+  android-apk:
+    name: android apk
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The app bundles the web UI (gitignored) — build it from source first.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            mobile/package-lock.json
+
+      # Capacitor 8's Android Gradle plugin needs JDK 21.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build signed APK
+        working-directory: mobile
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS secrets are not set"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          version="${version%%-*}"   # a pre-release suffix is not a valid versionName input
+          npm ci
+          npm run bundle-web
+          npx cap add android
+          node scripts/wire-native.mjs --android --version "$version"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          # apksigner lives in the SDK's build-tools, which is not on PATH.
+          export PATH="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1):$PATH"
+          # The release key is a PKCS12 store: one password for store and key.
+          npx cap build android \
+            --keystorepath "$RUNNER_TEMP/release.jks" \
+            --keystorepass "$ANDROID_KEYSTORE_PASSWORD" \
+            --keystorealias "$ANDROID_KEY_ALIAS" \
+            --keystorealiaspass "$ANDROID_KEYSTORE_PASSWORD" \
+            --androidreleasetype APK --signing-type apksigner
+          rm -f "$RUNNER_TEMP/release.jks"
+          cp android/app/build/outputs/apk/release/app-release-signed.apk "$RUNNER_TEMP/octo-android.apk"
+
+      - name: Attach APK to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/octo-android.apk" --clobber
+
   # Publish desktop-checksums.txt covering the desktop artifacts the jobs above
   # attached. goreleaser's checksums.txt only covers its own (CLI) assets; the
   # desktop app's in-place updater fetches this sidecar to verify the artifact
