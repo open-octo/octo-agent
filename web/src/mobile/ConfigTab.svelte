@@ -40,9 +40,9 @@
 </script>
 
 <script lang="ts">
-  // Config tab: the server's capability inventory — Light Apps, skills, MCP
-  // servers, workflows, memories, trash — as a root list drilling into
-  // per-kind sections. Remote-control scope: Light Apps open full-screen,
+  // Me tab: the server's capability inventory — Light Apps, skills, MCP
+  // servers, workflows, memories — and trash as a root list drilling into
+  // per-kind sections, followed by the app's own preferences and about. Remote-control scope: Light Apps open full-screen,
   // skills/MCP get enable switches, the rest are read-only inventories;
   // installing/editing stays on desktop.
   import { onMount } from 'svelte'
@@ -50,6 +50,7 @@
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
   import PageViewer from './PageViewer.svelte'
+  import Prefs from './Prefs.svelte'
   import { pageSrc } from './pageURL'
 
   const mcpStatusKey: Record<McpInfo['status'], string> = {
@@ -168,10 +169,10 @@
     { key: 'mcp' as Section, label: $t('m.mcp'), count: nEnabled(mcp.filter(m => !m.disabled).length, mcp.length) },
     { key: 'workflows' as Section, label: $t('m.workflows'), count: $t('m.count_wf').replace('{n}', String(workflows.length)) },
     { key: 'memory' as Section, label: $t('m.memory'), count: $t('m.count_mem').replace('{n}', String(memories.length)) },
-    { key: 'trash' as Section, label: $t('m.trash'), count: $t('m.count_trash').replace('{n}', String(trash.length)) },
   ])
+  const trashRow = $derived({ key: 'trash' as Section, label: $t('m.trash'), count: $t('m.count_trash').replace('{n}', String(trash.length)) })
   const titleKeys: Record<Section, string> = {
-    root: 'm.tab_config', apps: 'm.light_apps', skills: 'm.skills', mcp: 'm.mcp', workflows: 'm.workflows', memory: 'm.memory', trash: 'm.trash',
+    root: 'm.tab_me', apps: 'm.light_apps', skills: 'm.skills', mcp: 'm.mcp', workflows: 'm.workflows', memory: 'm.memory', trash: 'm.trash',
   }
 </script>
 
@@ -185,12 +186,15 @@
 </header>
 
 <div class="scroll">
-  {#if loading}
-    <div class="empty">{$t('m.loading')}</div>
-  {:else if section === 'root'}
-    {#if loadError}
+  {#if section === 'root'}
+    <!-- Preferences render regardless of the inventory fetch: they are the
+         app's own and must stay reachable when the server is not. -->
+    {#if loading}
+      <div class="empty">{$t('m.loading')}</div>
+    {:else if loadError}
       <button class="empty retry" onclick={load}>{$t('m.load_retry')}</button>
     {:else}
+      <p class="lbl">{$t('m.capabilities')}</p>
       <div class="card group">
         {#each groups as g (g.key)}
           <button class="row nav" onclick={() => (section = g.key)}>
@@ -201,7 +205,15 @@
         {/each}
       </div>
       <p class="hint">{$t('m.desktop_hint')}</p>
+      <div class="card group">
+        <button class="row nav" onclick={() => (section = trashRow.key)}>
+          <span class="rlabel">{trashRow.label}</span>
+          <span class="rval">{trashRow.count}</span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-4)" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </div>
     {/if}
+    <Prefs />
   {:else if section === 'apps'}
     {#if apps.length === 0}<div class="empty">{$t('m.no_apps')}</div>{:else}
       <div class="card group">
@@ -316,9 +328,11 @@
 
   .card { background: var(--m-surface); border-radius: 14px; box-shadow: var(--m-shadow-card); }
   .group { overflow: hidden; margin-bottom: 14px; }
+  .lbl { margin: 2px 2px 8px; font: 600 12px/1 system-ui; letter-spacing: .5px; text-transform: uppercase; color: var(--m-text-3); }
   .row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; width: 100%; }
   .row + .row { border-top: 1px solid var(--m-divider); }
   .row.nav { background: none; border-left: none; border-right: none; border-bottom: none; font-family: inherit; cursor: pointer; text-align: left; min-height: 48px; }
+  .row.nav:first-child { border-top: none; }
   .names { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .rlabel { flex: 1; font-size: 14.5px; color: var(--m-text); display: flex; align-items: center; gap: 6px; min-width: 0; }
   .rval { flex: none; font-size: 12.5px; color: var(--m-text-3); }
@@ -328,7 +342,7 @@
   .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
   .dot.ok { background: var(--m-success); }
   .dot.bad { background: var(--m-error); }
-  .hint { margin: 2px 4px; font-size: 12px; color: var(--m-text-4); text-align: center; }
+  .hint { margin: -4px 4px 18px; font-size: 12px; color: var(--m-text-4); text-align: center; }
   .empty { padding: 40px 16px; text-align: center; font-size: 13px; color: var(--m-text-3); }
   .retry { display: block; width: 100%; background: none; border: none; font-family: inherit; color: var(--m-accent); cursor: pointer; }
 
