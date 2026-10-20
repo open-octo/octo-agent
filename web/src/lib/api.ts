@@ -1320,6 +1320,20 @@ export async function checkVersion(): Promise<{ latest: string; needs_update: bo
   return request('/api/version/check', { method: 'POST' })
 }
 
+// Mobile app connection
+
+export interface MobileConnectInfo {
+  access_key: string
+  urls: string[]
+  loopback_only: boolean
+}
+
+// getMobileConnect returns what the Settings › Mobile QR encodes: the access key
+// and the addresses a phone on the same network may reach this server at.
+export async function getMobileConnect(): Promise<MobileConnectInfo> {
+  return request<MobileConnectInfo>('/api/mobile/connect', { cache: 'no-store' })
+}
+
 // Browser automation setup
 
 export interface BrowserStatus {

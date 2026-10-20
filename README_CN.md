@@ -66,7 +66,7 @@ octo（单二进制）
   -> 移动端                iOS + Android 开发者预览
 ```
 
-**稳定版（1.0）** 已覆盖 TUI、CLI、Web UI、桌面端、IM 桥接、[VS Code](https://github.com/open-octo/octo-vscode) / [Obsidian](https://github.com/open-octo/octo-obsidian) 插件；第八个界面——移动端 App（iOS + Android）——已实现，目前是**开发者预览**：现在即可从源码自建、配合自托管 relay 使用（见 [`mobile/`](mobile/)），托管 relay 与应用商店版本在路上。
+**稳定版（1.0）** 已覆盖 TUI、CLI、Web UI、桌面端、IM 桥接、[VS Code](https://github.com/open-octo/octo-vscode) / [Obsidian](https://github.com/open-octo/octo-obsidian) 插件；第八个界面——移动端 App（iOS + Android）——已实现，目前是**开发者预览**：现在即可从源码构建，经局域网、Tailscale 或任意隧道直连你自己的 `octo serve`（见 [`mobile/`](mobile/)），应用商店版本在路上。
 
 ## 核心特性
 

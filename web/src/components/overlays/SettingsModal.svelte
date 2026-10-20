@@ -3,6 +3,7 @@
   import ThemePackPicker from '../ui/ThemePackPicker.svelte'
   import Switch from '../ui/Switch.svelte'
   import EndpointsSection from '../settings/EndpointsSection.svelte'
+  import MobileSection from '../settings/MobileSection.svelte'
   import ProfilesSection from '../settings/ProfilesSection.svelte'
   import FileRecallView from '../../views/FileRecallView.svelte'
   import ProfileView from '../../views/ProfileView.svelte'
@@ -61,7 +62,7 @@
   let upgradeMode   = $state<'cli' | 'installer'>('cli')
   let loading       = $state(true)
 
-  let cat = $state<'general' | 'endpoints' | 'agent' | 'experimental' | 'data' | 'about'>('general')
+  let cat = $state<'general' | 'endpoints' | 'agent' | 'mobile' | 'experimental' | 'data' | 'about'>('general')
   let modalEl = $state<HTMLDivElement | null>(null)
 
   // 数据管理 has its own two-level nav — a list of managed things, and one
@@ -242,6 +243,7 @@
     { key: 'general',   icon: 'ant-design:sliders-outlined',       label: 'settings.general' },
     { key: 'endpoints', icon: 'ant-design:api-outlined',           label: 'settings.endpoints.title' },
     { key: 'agent',     icon: 'ant-design:robot-outlined',         label: 'settings.agent' },
+    { key: 'mobile',    icon: 'ant-design:mobile-outlined',        label: 'settings.mobile' },
     // Experimental features (computer-use) need a platform with a substrate —
     // macOS (AX/CGEvent) or Windows (UI Automation/SendInput) on the machine
     // running octo. Shown on web too: a CLI/serve octo works the same, its
@@ -618,6 +620,9 @@
               onchange={(e) => saveWorkspaceDir(e.currentTarget.value)}
             />
           </div>
+
+        {:else if cat === 'mobile'}
+          <MobileSection />
 
         {:else if cat === 'experimental'}
           <div class="setrow">

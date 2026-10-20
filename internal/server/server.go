@@ -903,6 +903,7 @@ func (s *Server) registerRoutes() {
 	s.api("PATCH /api/session-groups/{id}", s.handleUpdateSessionGroup)
 	s.api("DELETE /api/session-groups/{id}", s.handleDeleteSessionGroup)
 	s.api("GET /api/fs/list", s.handleFsList)
+	s.api("GET /api/mobile/connect", s.handleMobileConnect)
 	if s.cfg.Native != nil {
 		// Desktop build only: OS-native capabilities. Absent under `octo serve`.
 		s.api("POST /api/native/pick-folder", s.handleNativePickFolder)
@@ -1085,7 +1086,7 @@ func (s *Server) registerRoutes() {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		allowed := isVSCodeWebviewOrigin(origin) || isObsidianDesktopOrigin(origin)
+		allowed := isVSCodeWebviewOrigin(origin) || isObsidianDesktopOrigin(origin) || isCapacitorOrigin(origin)
 		wildcard := false
 		for _, o := range s.cfg.CORSOrigins {
 			if o == "*" {

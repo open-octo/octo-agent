@@ -1,78 +1,104 @@
 import { installShim } from './shim'
-import { BufferingTransport } from './buffering-transport'
-import { ManagedRelayTransport } from './transport'
-import { OctoTunnel, registerPlugin } from './plugin'
-import { parsePairingURL, type PairingInfo } from './pairing'
-import { scanPairingURL } from './qr'
-
-// The first-party App plugin, resolved through the same native bridge as
-// OctoTunnel (see plugin.ts) rather than @capacitor/app's JS, so a scanned QR
-// arriving as an octo-pair:// deep link reaches us via appUrlOpen.
-interface AppPlugin {
-  getLaunchUrl(): Promise<{ url: string } | null>
-  addListener(event: 'appUrlOpen', cb: (data: { url: string }) => void): void
-}
-const App = registerPlugin<AppPlugin>('App')
+import { clearConnection, loadConnection, parseConnectLink, saveConnection, type Connection } from './connection'
+import { scanConnectLink } from './qr'
 
 // boot is octo-mobile's entry point. It is bundled to a classic script and
 // injected as the first element of the bundled frontend's <head>, so it runs
-// before any frontend module. It installs the local shim (shim.ts) against a
-// BufferingTransport immediately — so the frontend's /api + /ws traffic is
-// captured and held from its very first request — then pairs (scanning the
-// host's QR on first launch, or reusing the stored pairing), stands up the
-// native managed-relay transport, and hands it to the buffer to flush. The
-// frontend never learns it started life offline.
+// before any frontend module. With a saved connection it installs the shim
+// (shim.ts) right away, so the frontend's very first /api call already goes to
+// the server. Without one it covers the page with a connect screen; once a link
+// checks out it is saved and the page reloads into the first case.
 
-const STORAGE_KEY = 'octo:pairing'
+const zh = (navigator.language || '').toLowerCase().startsWith('zh')
+const text = zh
+  ? {
+      sub: '连接到你的 octo serve',
+      scan: '扫码连接',
+      paste: '或粘贴 octo serve 打印的链接',
+      connect: '连接',
+      checking: '正在连接…',
+      badKey: 'access key 不对',
+      unreachable: (base: string) => `连不上 ${base}，确认手机能访问这个地址`,
+      failed: (msg: string) => `连接失败：${msg}`,
+    }
+  : {
+      sub: 'Connect to your octo serve',
+      scan: 'Scan QR code',
+      paste: 'or paste the link octo serve prints',
+      connect: 'Connect',
+      checking: 'Connecting…',
+      badKey: 'The access key was rejected',
+      unreachable: (base: string) => `Can't reach ${base} — make sure this phone can reach that address`,
+      failed: (msg: string) => `Connection failed: ${msg}`,
+    }
 
-const buffering = new BufferingTransport()
-installShim(buffering)
-
-// Guards against pairing more than once. On a cold start into a deep link,
-// Capacitor delivers the same octo-pair:// URL through BOTH getLaunchUrl() and
-// appUrlOpen; without this, two pair() calls race on the one-time token — the
-// first pairs, the second is rejected 403 and tears the shared session down.
-let pairing = false
-
-function loadStored(): PairingInfo | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as PairingInfo) : null
-  } catch {
-    return null
+// window.octoMobile lets the mobile UI (web/src/mobile) show which server it is
+// on and switch to another, without importing anything from this project.
+declare global {
+  interface Window {
+    octoMobile?: { server: string; disconnect(): void }
   }
 }
 
-function saveStored(info: PairingInfo): void {
+function disconnect(): void {
+  clearConnection()
+  location.reload()
+}
+
+// check probes a gated endpoint, so a wrong key shows as 401 rather than
+// passing on an exempt route.
+async function check(conn: Connection): Promise<void> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), 8000)
+  let r: Response
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(info))
+    r = await fetch(`${conn.base}/api/sessions?limit=1`, {
+      headers: { 'X-Access-Key': conn.key },
+      signal: ctl.signal,
+    })
   } catch {
-    // Best effort: a paired session still works this launch without persistence.
+    throw new Error(text.unreachable(conn.base))
+  } finally {
+    clearTimeout(timer)
   }
+  if (r.status === 401) throw new Error(text.badKey)
+  if (!r.ok) throw new Error(text.failed(`HTTP ${r.status}`))
 }
 
-async function connect(info: PairingInfo): Promise<void> {
-  const transport = new ManagedRelayTransport(OctoTunnel, info)
-  await transport.connect()
-  await buffering.attach(transport)
-}
+// ── connect screen ──────────────────────────────────────────────────────────
+// A full-screen gate over the frontend, which renders underneath unconnected.
 
-// ── pairing overlay ─────────────────────────────────────────────────────────
-// A minimal full-screen gate shown until a session is live. The frontend is
-// rendering underneath (its requests buffered), so this must fully cover it.
-
-let overlay: HTMLElement | null = null
 let statusEl: HTMLElement | null = null
+let busy = false
 
 function ensureBody(): Promise<void> {
   if (document.body) return Promise.resolve()
   return new Promise((r) => document.addEventListener('DOMContentLoaded', () => r(), { once: true }))
 }
 
-async function showOverlay(): Promise<void> {
+function setStatus(s: string): void {
+  if (statusEl) statusEl.textContent = s
+}
+
+async function connectWith(link: string): Promise<void> {
+  if (busy) return
+  busy = true
+  try {
+    const conn = parseConnectLink(link)
+    setStatus(text.checking)
+    await check(conn)
+    saveConnection(conn)
+    location.reload()
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : String(err))
+  } finally {
+    busy = false
+  }
+}
+
+async function showConnectScreen(): Promise<void> {
   await ensureBody()
-  if (overlay) return
-  overlay = document.createElement('div')
+  const overlay = document.createElement('div')
   overlay.style.cssText =
     'position:fixed;inset:0;z-index:2147483646;background:#0f1115;color:#fff;' +
     'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
@@ -83,107 +109,55 @@ async function showOverlay(): Promise<void> {
   title.style.cssText = 'font-size:32px;font-weight:700;letter-spacing:-0.5px;'
 
   const sub = document.createElement('div')
-  sub.textContent = '连接到你的 octo serve'
+  sub.textContent = text.sub
   sub.style.cssText = 'font-size:15px;opacity:0.7;'
 
-  const button = document.createElement('button')
-  button.textContent = '扫码配对'
-  button.style.cssText =
-    'padding:14px 40px;border:0;border-radius:26px;background:#3b82f6;color:#fff;' +
+  const scan = document.createElement('button')
+  scan.textContent = text.scan
+  scan.style.cssText =
+    'padding:14px 40px;border:0;border-radius:26px;background:#1677ff;color:#fff;' +
     'font-size:16px;font-weight:600;'
-  button.onclick = () => void startScan()
+  scan.onclick = async () => {
+    try {
+      await connectWith(await scanConnectLink())
+    } catch (err) {
+      if (err instanceof Error && err.message === 'scan cancelled') return
+      setStatus(text.failed(err instanceof Error ? err.message : String(err)))
+    }
+  }
+
+  const form = document.createElement('form')
+  form.style.cssText = 'display:flex;gap:8px;width:100%;max-width:360px;'
+  const input = document.createElement('input')
+  input.type = 'url'
+  input.placeholder = text.paste
+  input.autocapitalize = 'off'
+  input.spellcheck = false
+  input.style.cssText =
+    'flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid #333;' +
+    'background:#1a1d24;color:#fff;font-size:14px;'
+  const go = document.createElement('button')
+  go.type = 'submit'
+  go.textContent = text.connect
+  go.style.cssText = 'padding:0 16px;border:0;border-radius:10px;background:#2a2f3a;color:#fff;font-size:14px;'
+  form.append(input, go)
+  form.onsubmit = (e) => {
+    e.preventDefault()
+    if (input.value.trim()) void connectWith(input.value)
+  }
 
   statusEl = document.createElement('div')
-  statusEl.style.cssText = 'font-size:13px;opacity:0.6;min-height:18px;'
+  statusEl.style.cssText = 'font-size:13px;opacity:0.7;min-height:18px;max-width:360px;'
 
-  overlay.append(title, sub, button, statusEl)
+  overlay.append(title, sub, scan, form, statusEl)
   document.body.appendChild(overlay)
 }
 
-function setStatus(text: string): void {
-  if (statusEl) statusEl.textContent = text
-}
-
-function hideOverlay(): void {
-  overlay?.remove()
-  overlay = null
-  statusEl = null
-}
-
-async function pairWith(url: string): Promise<void> {
-  if (pairing || buffering.attached) return
-  pairing = true
-  try {
-    const info = parsePairingURL(url)
-    setStatus('正在建立加密隧道…')
-    await connect(info)
-    saveStored(info)
-    hideOverlay()
-  } catch (err) {
-    pairing = false // allow a retry (scan again / re-open the link)
-    throw err
-  }
-}
-
-async function startScan(): Promise<void> {
-  try {
-    const url = await scanPairingURL()
-    await pairWith(url)
-  } catch (err) {
-    if (err instanceof Error && err.message === 'scan cancelled') return
-    setStatus(`配对失败：${err instanceof Error ? err.message : String(err)}`)
-  }
-}
-
 // ── entry ─────────────────────────────────────────────────────────────────
-async function boot(): Promise<void> {
-  const stored = loadStored()
-  if (stored) {
-    try {
-      await connect(stored)
-      return
-    } catch {
-      // The stored pairing is stale (host rekeyed, token spent, relay moved).
-      // Drop it and fall through to a fresh pairing.
-      try {
-        localStorage.removeItem(STORAGE_KEY)
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  // Dev fallback: check for a pairing file injected via adb (avoids deep-link
-  // fragility on emulators where Capacitor's appUrlOpen fires before the JS
-  // listener is loaded).
-  try {
-    const resp = await fetch('/octo-pairing.json', { cache: 'no-store' })
-    if (resp.ok) {
-      const info = await resp.json() as PairingInfo
-      if (info.relay && info.tunnelId && info.hostKey && info.token) {
-        await connect(info)
-        saveStored(info)
-        return
-      }
-    }
-  } catch {
-    // No dev pairing file — normal flow continues.
-  }
-
-  await showOverlay()
-
-  // A QR scanned by the system camera app (or an `adb … VIEW` in dev) arrives as
-  // an octo-pair:// deep link, delivered through the App plugin.
-  if (App) {
-    App.getLaunchUrl()
-      .then((launch) => {
-        if (launch?.url?.startsWith('octo-pair://')) void pairWith(launch.url).catch(() => {})
-      })
-      .catch(() => {})
-    App.addListener('appUrlOpen', (event) => {
-      if (event.url?.startsWith('octo-pair://')) void pairWith(event.url).catch((err) => setStatus(String(err)))
-    })
-  }
+const saved = loadConnection()
+if (saved) {
+  installShim(saved)
+  window.octoMobile = { server: saved.base, disconnect }
+} else {
+  void showConnectScreen()
 }
-
-void boot()

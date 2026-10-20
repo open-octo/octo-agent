@@ -1,37 +1,30 @@
-// Wires the native OctoTunnel plugin into the generated iOS/Android projects
+// Applies octo-mobile's native settings to the generated iOS/Android projects
 // after `npx cap add ios` / `add android`. The generated `ios/` and `android/`
 // folders are gitignored, so this must be re-run each time they are regenerated.
-// It automates mobile/native/README.md — the source of truth for what each step
-// does and why.
 //
-// Design: every mutation is idempotent (running twice is a no-op) and safe. A
-// step that copies a file always succeeds; a step that injects into a generated
-// file (Gradle / Manifest / Info.plist / Xcode project) first checks whether it
-// is already there, and if it cannot find its anchor it does NOT blindly edit —
-// it records a warning with the exact snippet to add by hand and moves on.
-// Both platforms are fully automated end to end, including the iOS
-// plugin-instance registration (a generated CAPBridgeViewController subclass +
-// a programmatic root VC): no manual step remains for a standard
-// Capacitor-generated project.
+// The app has no custom native code — it is the bundled frontend talking to
+// octo serve over fetch/WebSocket — so all this does is grant two things:
+//   - the camera, for scanning the connect QR (getUserMedia);
+//   - plain-http networking, since a user's server is often http://<LAN or
+//     Tailscale IP>:8088.
+//
+// Every mutation is idempotent (running twice is a no-op). A step that cannot
+// find its anchor does not edit blindly; it prints what to add by hand.
 //
 // Usage:
 //   node scripts/wire-native.mjs            # wire whichever of ios/ android/ exist
 //   node scripts/wire-native.mjs --ios      # iOS only
 //   node scripts/wire-native.mjs --android  # Android only
-//   node scripts/wire-native.mjs --local    # also inject the local-testing
-//                                           # cleartext switches (NEVER for release)
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 const mobileRoot = fileURLToPath(new URL('..', import.meta.url))
-const nativeDir = join(mobileRoot, 'native')
 const iosRoot = join(mobileRoot, 'ios')
 const androidRoot = join(mobileRoot, 'android')
 
 const args = new Set(process.argv.slice(2))
-const local = args.has('--local')
 const onlyIos = args.has('--ios')
 const onlyAndroid = args.has('--android')
 const wantIos = onlyIos || !onlyAndroid
@@ -42,175 +35,21 @@ const warn = (msg) => warnings.push(msg)
 const done = []
 const did = (msg) => done.push(msg)
 
-// injectOnce inserts `insert` into the file at `path` only when `marker` is
-// absent. It splices `insert` right after the first line matching `anchor`. If
-// the anchor is missing it records a warning with the snippet and leaves the file
-// untouched. Returns true when the file already had it or was edited, false when
-// the anchor was not found.
-function injectOnce(path, { marker, anchor, insert, label }) {
-  const text = readFileSync(path, 'utf8')
-  if (text.includes(marker)) return true
-  const lines = text.split('\n')
-  const idx = lines.findIndex((l) => anchor.test(l))
-  if (idx === -1) {
-    warn(`${label}: could not find anchor in ${path}. Add manually:\n${insert}`)
-    return false
-  }
-  lines.splice(idx + 1, 0, insert)
-  writeFileSync(path, lines.join('\n'))
-  did(label)
-  return true
-}
-
 // ---------------------------------------------------------------- iOS
 function wireIos() {
-  if (!existsSync(iosRoot)) {
-    warn('iOS: ios/ not found — run `npx cap add ios` first, then re-run.')
+  const plist = join(iosRoot, 'App', 'App', 'Info.plist')
+  if (!existsSync(plist)) {
+    warn('iOS: ios/App/App/Info.plist not found — run `npx cap add ios` first, then re-run.')
     return
   }
-  const appDir = join(iosRoot, 'App', 'App')
-  if (!existsSync(appDir)) {
-    warn(`iOS: ${appDir} not found — is this a Capacitor-generated ios/ project?`)
-    return
-  }
-
-  // 1. Plugin source + the bridge VC that registers it (see writeBridgeVC).
-  const pluginDst = join(appDir, 'OctoTunnelPlugin.swift')
-  copyFileSync(join(nativeDir, 'OctoTunnelPlugin.swift'), pluginDst)
-  did(`iOS: copied OctoTunnelPlugin.swift -> ${pluginDst}`)
-  writeBridgeVC(appDir)
-
-  // 2. Plugin registration. OctoTunnel is a hand-written native plugin with no
-  //    JS-side registry entry, so it must be registered as an INSTANCE. We do
-  //    it programmatically (AppDelegate builds an OctoBridgeViewController as the
-  //    root VC) and drop Main.storyboard — under Xcode 26's SDK with only an
-  //    older simulator runtime, compiling the storyboard fails "Platform Not
-  //    Installed", and the programmatic root sidesteps that entirely.
-  rewriteAppDelegate(appDir)
-  pbxAddSources(join(iosRoot, 'App', 'App.xcodeproj', 'project.pbxproj'), [
-    'OctoTunnelPlugin.swift',
-    'OctoBridgeViewController.swift',
-  ])
-
-  // 3. Info.plist — camera usage + octo-pair URL scheme, drop the storyboard
-  //    reference (we set the root VC in code), (+ optional cleartext).
-  //    PlistBuddy ships with macOS; on other hosts we can only instruct.
-  const plist = join(appDir, 'Info.plist')
   if (process.platform !== 'darwin') {
-    warn('iOS: Info.plist edits need macOS PlistBuddy; skipped. See native/README.md step 3-4.')
-  } else if (existsSync(plist)) {
-    plistUpsert(plist, ':NSCameraUsageDescription', 'string', 'Scan the pairing QR code.')
-    plistEnsureUrlScheme(plist, 'octo-pair')
-    plistDelete(plist, ':UIMainStoryboardFile') // root VC is set in AppDelegate
-    if (local) {
-      plistSet(plist, ':NSAppTransportSecurity:NSAllowsLocalNetworking', 'bool', 'true')
-      did('iOS: injected NSAllowsLocalNetworking (LOCAL testing only)')
-    }
-    did('iOS: Info.plist camera usage + octo-pair scheme ensured; dropped UIMainStoryboardFile')
-  } else {
-    warn(`iOS: ${plist} not found; add NSCameraUsageDescription + CFBundleURLTypes by hand.`)
-  }
-}
-
-// writeBridgeVC writes the CAPBridgeViewController subclass that registers the
-// OctoTunnel plugin instance. Idempotent (overwrite is fine — content fixed).
-function writeBridgeVC(appDir) {
-  const path = join(appDir, 'OctoBridgeViewController.swift')
-  writeFileSync(
-    path,
-    `import Capacitor
-import UIKit
-
-// The bridge view controller for octo-mobile. OctoTunnel is a hand-written
-// native plugin with no JS-side registration, so it must be registered as an
-// INSTANCE (registerPluginInstance, not registerPluginType). capacitorDidLoad
-// runs after the bridge is ready but before the webview loads — exactly when a
-// plugin must exist. (Generated by mobile/scripts/wire-native.mjs.)
-class OctoBridgeViewController: CAPBridgeViewController {
-    override func capacitorDidLoad() {
-        bridge?.registerPluginInstance(OctoTunnelPlugin())
-    }
-}
-`,
-  )
-  did('iOS: wrote OctoBridgeViewController.swift')
-}
-
-// rewriteAppDelegate makes AppDelegate build the OctoBridgeViewController as the
-// window's root VC in code (dropping Main.storyboard). Idempotent.
-function rewriteAppDelegate(appDir) {
-  const path = join(appDir, 'AppDelegate.swift')
-  if (!existsSync(path)) {
-    warn(`iOS: ${path} not found; set OctoBridgeViewController as the root VC by hand.`)
+    warn('iOS: Info.plist edits need macOS PlistBuddy; add NSCameraUsageDescription and NSAppTransportSecurity › NSAllowsArbitraryLoads by hand.')
     return
   }
-  let text = readFileSync(path, 'utf8')
-  if (text.includes('OctoBridgeViewController()')) return
-  text = text.replace(
-    /func application\(_ application: UIApplication, didFinishLaunchingWithOptions[^\n]*\n(\s*)\/\/[^\n]*\n\s*return true\n\s*\}/,
-    (m, indent) =>
-      m.replace(
-        /\n\s*\/\/[^\n]*\n\s*return true/,
-        `\n${indent}// Programmatic root VC (registers the OctoTunnel plugin, avoids the\n` +
-          `${indent}// Xcode-26/simulator-runtime storyboard "Platform Not Installed" issue).\n` +
-          `${indent}// Generated by mobile/scripts/wire-native.mjs.\n` +
-          `${indent}let window = UIWindow(frame: UIScreen.main.bounds)\n` +
-          `${indent}window.rootViewController = OctoBridgeViewController()\n` +
-          `${indent}window.makeKeyAndVisible()\n` +
-          `${indent}self.window = window\n` +
-          `${indent}return true`,
-      ),
-  )
-  if (!text.includes('OctoBridgeViewController()')) {
-    warn('iOS: could not rewrite AppDelegate didFinishLaunching; set the root VC by hand.')
-    return
-  }
-  writeFileSync(path, text)
-  did('iOS: rewired AppDelegate to a programmatic OctoBridgeViewController root')
-}
-
-// pbxAddSources adds Swift files to the App target's project.pbxproj: a
-// PBXBuildFile, a PBXFileReference, the App group's children, and the Sources
-// build phase — mirroring how AppDelegate.swift is wired. Idempotent per file.
-// `npx cap add ios` copies the .swift into the folder but never registers it in
-// the project, so without this the files are not compiled.
-function pbxAddSources(pbxproj, files) {
-  if (!existsSync(pbxproj)) {
-    warn(`iOS: ${pbxproj} not found; add the Swift files to the target by hand.`)
-    return
-  }
-  let s = readFileSync(pbxproj, 'utf8')
-  // Anchor off AppDelegate.swift's four references (build file, file ref, group
-  // child, sources entry). Bail clearly if the template shape changed.
-  const bfAnchor = /(\t*)([0-9A-F]{24}) \/\* AppDelegate\.swift in Sources \*\/ = \{isa = PBXBuildFile; fileRef = ([0-9A-F]{24}) \/\* AppDelegate\.swift \*\/; \};/
-  const frAnchor = /(\t*)([0-9A-F]{24}) \/\* AppDelegate\.swift \*\/ = \{isa = PBXFileReference;[^\n]*\};/
-  const grpAnchor = /(\t*)([0-9A-F]{24}) \/\* AppDelegate\.swift \*\/,/
-  const srcAnchor = /(\t*)([0-9A-F]{24}) \/\* AppDelegate\.swift in Sources \*\/,/
-  if (!bfAnchor.test(s) || !frAnchor.test(s) || !grpAnchor.test(s) || !srcAnchor.test(s)) {
-    warn('iOS: AppDelegate anchors not found in project.pbxproj; add the Swift files by hand.')
-    return
-  }
-  // Deterministic 24-hex ids from the file name so re-runs are stable.
-  const idFor = (name, salt) => {
-    let h = 0
-    for (const ch of name + salt) h = (h * 131 + ch.charCodeAt(0)) >>> 0
-    return ('AA' + h.toString(16).toUpperCase().padStart(22, '0')).slice(0, 24)
-  }
-  let added = []
-  for (const name of files) {
-    if (s.includes(`/* ${name} */`)) continue // already registered
-    const fr = idFor(name, 'ref')
-    const bf = idFor(name, 'build')
-    s = s.replace(bfAnchor, (m, t) => `${m}\n${t}${bf} /* ${name} in Sources */ = {isa = PBXBuildFile; fileRef = ${fr} /* ${name} */; };`)
-    s = s.replace(frAnchor, (m, t) => `${m}\n${t}${fr} /* ${name} */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ${name}; sourceTree = "<group>"; };`)
-    s = s.replace(grpAnchor, (m, t) => `${m}\n${t}${fr} /* ${name} */,`)
-    s = s.replace(srcAnchor, (m, t) => `${m}\n${t}${bf} /* ${name} in Sources */,`)
-    added.push(name)
-  }
-  if (added.length) {
-    writeFileSync(pbxproj, s)
-    did(`iOS: added to Xcode project: ${added.join(', ')}`)
-  }
+  plistUpsert(plist, ':NSCameraUsageDescription', 'string', 'Scan the connect QR code.')
+  // ATS blocks plain http by default; the user's server is often http.
+  plistSet(plist, ':NSAppTransportSecurity:NSAllowsArbitraryLoads', 'bool', 'true')
+  did('iOS: Info.plist camera usage + NSAllowsArbitraryLoads')
 }
 
 function plistBuddy(plist, cmd) {
@@ -232,132 +71,19 @@ function plistSet(plist, entry, type, value) {
   if (plistHas(plist, entry)) plistBuddy(plist, `Set ${entry} ${value}`)
   else plistBuddy(plist, `Add ${entry} ${type} ${value}`)
 }
-function plistDelete(plist, entry) {
-  if (plistHas(plist, entry)) plistBuddy(plist, `Delete ${entry}`)
-}
-function plistEnsureUrlScheme(plist, scheme) {
-  // Idempotent: only build CFBundleURLTypes[0] when it is absent.
-  if (plistHas(plist, ':CFBundleURLTypes:0:CFBundleURLSchemes:0')) return
-  plistBuddy(plist, 'Add :CFBundleURLTypes array')
-  plistBuddy(plist, 'Add :CFBundleURLTypes:0 dict')
-  plistBuddy(plist, 'Add :CFBundleURLTypes:0:CFBundleURLSchemes array')
-  plistBuddy(plist, `Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string ${scheme}`)
-}
 
 // ---------------------------------------------------------------- Android
 function wireAndroid() {
-  if (!existsSync(androidRoot)) {
-    warn('Android: android/ not found — run `npx cap add android` first, then re-run.')
+  const manifest = join(androidRoot, 'app', 'src', 'main', 'AndroidManifest.xml')
+  if (!existsSync(manifest)) {
+    warn('Android: AndroidManifest.xml not found — run `npx cap add android` first, then re-run.')
     return
   }
-
-  // 3. Plugin source into the app package.
-  const pkgDir = join(androidRoot, 'app', 'src', 'main', 'java', 'dev', 'octo', 'mobile')
-  mkdirSync(pkgDir, { recursive: true })
-  const dst = join(pkgDir, 'OctoTunnelPlugin.kt')
-  copyFileSync(join(nativeDir, 'OctoTunnelPlugin.kt'), dst)
-  did(`Android: copied OctoTunnelPlugin.kt -> ${dst}`)
-
-  // 1. Kotlin support in the root build.gradle (Java-only template).
-  const rootGradle = join(androidRoot, 'build.gradle')
-  if (existsSync(rootGradle)) {
-    injectOnce(rootGradle, {
-      label: 'Android: kotlin-gradle-plugin classpath',
-      marker: 'kotlin-gradle-plugin',
-      anchor: /dependencies\s*\{/, // buildscript { dependencies { ... } }
-      insert: "        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22'",
-    })
-  } else {
-    warn(`Android: ${rootGradle} not found.`)
-  }
-
-  // 1+2. app/build.gradle — kotlin plugin, jvmTarget, and dependencies.
-  const appGradle = join(androidRoot, 'app', 'build.gradle')
-  if (existsSync(appGradle)) {
-    injectOnce(appGradle, {
-      label: 'Android: apply kotlin-android',
-      marker: "apply plugin: 'kotlin-android'",
-      anchor: /apply plugin: 'com\.android\.application'/,
-      insert: "apply plugin: 'kotlin-android'",
-    })
-    injectOnce(appGradle, {
-      label: 'Android: kotlinOptions jvmTarget',
-      marker: 'kotlinOptions',
-      anchor: /^android\s*\{/m,
-      // Must match javac's target, which defaults to the running JDK —
-      // Android Studio's bundled JBR is 21, and AGP hard-fails the build on
-      // a kotlinc/javac target mismatch.
-      insert: '    kotlinOptions { jvmTarget = "21" }',
-    })
-    injectOnce(appGradle, {
-      label: 'Android: dependencies (kotlin-stdlib, noise-java, okhttp)',
-      marker: 'com.github.auties00:noise-java',
-      anchor: /^dependencies\s*\{/m,
-      insert:
-        '    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"\n' +
-        '    implementation "com.github.auties00:noise-java:1.2"\n' +
-        '    implementation "com.squareup.okhttp3:okhttp:4.12.0"',
-    })
-  } else {
-    warn(`Android: ${appGradle} not found.`)
-  }
-
-  // 3. Register the plugin in MainActivity before super.onCreate.
-  const mainActivity = join(
-    androidRoot, 'app', 'src', 'main', 'java', 'dev', 'octo', 'mobile', 'MainActivity.java',
-  )
-  if (existsSync(mainActivity)) {
-    const text = readFileSync(mainActivity, 'utf8')
-    if (text.includes('registerPlugin(OctoTunnelPlugin.class)')) {
-      // already wired
-    } else if (/extends BridgeActivity\s*\{\}/.test(text)) {
-      // Capacitor 7's template is a bodyless one-liner with no onCreate —
-      // expand it with the registration BEFORE super.onCreate, which is
-      // where the bridge expects plugins to exist.
-      const expanded = text
-        .replace(
-          /^import com\.getcapacitor\.BridgeActivity;/m,
-          'import android.os.Bundle;\n\nimport com.getcapacitor.BridgeActivity;',
-        )
-        .replace(
-          /extends BridgeActivity\s*\{\}/,
-          'extends BridgeActivity {\n' +
-            '    @Override\n' +
-            '    public void onCreate(Bundle savedInstanceState) {\n' +
-            '        // Must run before super.onCreate so the bridge sees the plugin\n' +
-            '        // when it boots the webview (see mobile/native/README.md).\n' +
-            '        registerPlugin(OctoTunnelPlugin.class);\n' +
-            '        super.onCreate(savedInstanceState);\n' +
-            '    }\n' +
-            '}',
-        )
-      writeFileSync(mainActivity, expanded)
-      did('Android: registerPlugin in MainActivity (expanded bodyless template)')
-    } else {
-      injectOnce(mainActivity, {
-        label: 'Android: registerPlugin in MainActivity',
-        marker: 'registerPlugin(OctoTunnelPlugin.class)',
-        anchor: /super\.onCreate/,
-        insert: '        registerPlugin(OctoTunnelPlugin.class);',
-      })
-      // The anchor inserts AFTER super.onCreate; native/README wants it
-      // before, so if we injected, warn to move it up one line.
-      warn('Android: ensure `registerPlugin(OctoTunnelPlugin.class);` sits BEFORE super.onCreate in MainActivity.')
-    }
-  } else {
-    warn(`Android: ${mainActivity} not found (package may differ); register the plugin by hand.`)
-  }
-
-  // 4 (+5). AndroidManifest.xml — camera, deep-link intent-filter, cleartext.
-  const manifest = join(androidRoot, 'app', 'src', 'main', 'AndroidManifest.xml')
-  if (existsSync(manifest)) wireManifest(manifest)
-  else warn(`Android: ${manifest} not found.`)
-}
-
-function wireManifest(manifest) {
   let text = readFileSync(manifest, 'utf8')
   let changed = false
 
+  // Capacitor's WebChromeClient requests CAMERA at runtime for getUserMedia,
+  // but only a permission the manifest declares can be granted.
   if (!text.includes('android.permission.CAMERA')) {
     text = text.replace(
       /(<manifest[^>]*>)/,
@@ -368,27 +94,13 @@ function wireManifest(manifest) {
     did('Android: manifest camera permission + feature')
   }
 
-  if (local && !/android:usesCleartextTraffic="true"/.test(text)) {
-    text = text.replace(/<application\b/, '<application android:usesCleartextTraffic="true"')
-    changed = true
-    did('Android: manifest usesCleartextTraffic (LOCAL testing only)')
-  }
-
-  if (!text.includes('octo-pair')) {
-    const intentFilter =
-      '            <intent-filter>\n' +
-      '                <action android:name="android.intent.action.VIEW" />\n' +
-      '                <category android:name="android.intent.category.DEFAULT" />\n' +
-      '                <category android:name="android.intent.category.BROWSABLE" />\n' +
-      '                <data android:scheme="octo-pair" />\n' +
-      '            </intent-filter>'
-    // Insert just before the MainActivity's closing tag.
-    if (/<\/activity>/.test(text)) {
-      text = text.replace(/(\s*)<\/activity>/, `\n${intentFilter}$1</activity>`)
+  if (!/android:usesCleartextTraffic="true"/.test(text)) {
+    if (/<application\b/.test(text)) {
+      text = text.replace(/<application\b/, '<application android:usesCleartextTraffic="true"')
       changed = true
-      did('Android: manifest octo-pair deep-link intent-filter')
+      did('Android: manifest usesCleartextTraffic')
     } else {
-      warn('Android: no <activity> found in manifest; add the octo-pair intent-filter by hand.')
+      warn('Android: no <application> in the manifest; add android:usesCleartextTraffic="true" by hand.')
     }
   }
 
@@ -396,10 +108,6 @@ function wireManifest(manifest) {
 }
 
 // ---------------------------------------------------------------- run
-if (!existsSync(nativeDir)) {
-  console.error(`wire-native: ${nativeDir} not found — run from the mobile/ project.`)
-  process.exit(1)
-}
 if (wantIos) wireIos()
 if (wantAndroid) wireAndroid()
 
@@ -408,8 +116,4 @@ for (const d of done) console.log(`  ✓ ${d}`)
 if (warnings.length) {
   console.log('\nwire-native: manual steps / notes:')
   for (const w of warnings) console.log(`  • ${w}\n`)
-}
-if (local) {
-  console.log('NOTE: --local injected cleartext switches for simulator/emulator testing.')
-  console.log('      These MUST be removed before any release build.')
 }

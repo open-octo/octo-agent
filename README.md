@@ -66,7 +66,7 @@ octo (single binary)
   -> Mobile               iOS + Android developer preview
 ```
 
-**Stable (1.0)** already covers TUI, CLI, Web UI, Desktop, IM bridge, and the [VS Code](https://github.com/open-octo/octo-vscode) / [Obsidian](https://github.com/open-octo/octo-obsidian) extensions. The eighth — a mobile app (iOS + Android) — is implemented and in **developer preview**: buildable from source today against a self-hosted relay (see [`mobile/`](mobile/)), with a hosted relay and app-store builds next.
+**Stable (1.0)** already covers TUI, CLI, Web UI, Desktop, IM bridge, and the [VS Code](https://github.com/open-octo/octo-vscode) / [Obsidian](https://github.com/open-octo/octo-obsidian) extensions. The eighth — a mobile app (iOS + Android) — is implemented and in **developer preview**: buildable from source today and connecting straight to your own `octo serve` over your LAN, Tailscale or any tunnel (see [`mobile/`](mobile/)), with app-store builds next.
 
 ## Core Features
 

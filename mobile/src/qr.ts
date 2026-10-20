@@ -1,13 +1,13 @@
 import jsQR from 'jsqr'
 
-// scanPairingURL opens the device camera in a fullscreen overlay and scans for
-// an octo-pair:// QR — the pairing code the host renders in Settings › Mobile.
-// It resolves with the decoded URL string (validated only as far as the scheme;
-// parsePairingURL does the real parsing) and stops the camera. It rejects if the
+// scanConnectLink opens the device camera in a fullscreen overlay and scans for
+// the connect QR the server renders in Settings › Mobile. It resolves with the
+// decoded link (checked only for an access_key; parseConnectLink does the real
+// parsing) and stops the camera. It rejects if the
 // user cancels or the camera can't be opened. QR decoding runs entirely in JS
 // (jsQR over getUserMedia frames), so it needs no native scanner plugin — just
 // the CAMERA permission the Capacitor WebView requests on first getUserMedia.
-export function scanPairingURL(): Promise<string> {
+export function scanConnectLink(): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     let stream: MediaStream | null = null
     let raf = 0
@@ -56,7 +56,7 @@ export function scanPairingURL(): Promise<string> {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
         const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' })
-        if (code && code.data.startsWith('octo-pair://')) {
+        if (code && code.data.includes('access_key=')) {
           const url = code.data
           cleanup()
           resolve(url)
