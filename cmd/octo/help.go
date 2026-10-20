@@ -89,7 +89,8 @@ prompts changed is re-listed. octo asks for progress reports on tool calls;
 a server that sends them has them shown live under the running tool in the
 CLI and Web UI (the model still sees only the final result). A tool call
 fails after 60s without a response, but each progress report restarts that
-clock, up to 30 minutes in total.
+clock, up to 30 minutes in total. When a call times out or is interrupted,
+octo tells the server to stop it (notifications/cancelled).
 
 What's not yet implemented (v1): other server-initiated notifications (e.g.
 logging), resource subscriptions, sampling (server → client LLM calls),

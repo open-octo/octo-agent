@@ -153,6 +153,10 @@ const (
 	// progressToken in its _meta; Client.CallToolProgress routes it back to
 	// the waiting call.
 	MethodProgress = "notifications/progress"
+
+	// MethodCancelled tells the other side to stop working on a request the
+	// sender has given up on; see Client.cancelRequest.
+	MethodCancelled = "notifications/cancelled"
 )
 
 // ── initialize handshake ─────────────────────────────────────────────────
@@ -240,6 +244,13 @@ type CallToolParams struct {
 // it from sending any.
 type RequestMeta struct {
 	ProgressToken string `json:"progressToken,omitempty"`
+}
+
+// CancelledParams is the payload of notifications/cancelled. RequestID is the
+// id of the abandoned request exactly as it went out on the wire.
+type CancelledParams struct {
+	RequestID json.RawMessage `json:"requestId"`
+	Reason    string          `json:"reason,omitempty"`
 }
 
 // ProgressParams is the payload of notifications/progress. ProgressToken is
