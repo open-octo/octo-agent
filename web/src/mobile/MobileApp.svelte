@@ -6,6 +6,7 @@
   // dev-docs/mobile-ui-implementation.md).
   import './theme.css'
   import Feed from './Feed.svelte'
+  import SessionHistory from './SessionHistory.svelte'
   import ChatDetail from './ChatDetail.svelte'
   import ApprovalDetail from './ApprovalDetail.svelte'
   import SettingsTab from './SettingsTab.svelte'
@@ -26,6 +27,9 @@
   // New-task sheet (FAB) + the first message it queued, bound to the session
   // it was queued for — opening any other session must never inherit it.
   let newTask = $state(false)
+  // History / search page (null = closed). It stays open under a session
+  // opened from it, so backing out of the session returns to the list.
+  let history = $state<{ focus: boolean; query: string } | null>(null)
   let initial = $state<{ id: string; prompt: string } | null>(null)
 
   function openSession(id: string, kind: FeedKind) {
@@ -61,8 +65,15 @@
             onInitialSent={() => (initial = null)}
           />
         {/if}
+      {:else if history}
+        <SessionHistory
+          focus={history.focus}
+          bind:query={history.query}
+          onOpen={(id, kind) => { history!.focus = false; openSession(id, kind) }}
+          onBack={() => (history = null)}
+        />
       {:else}
-        <Feed onOpen={openSession} onNew={() => (newTask = true)} />
+        <Feed onOpen={openSession} onNew={() => (newTask = true)} onHistory={(focus) => (history = { focus, query: '' })} />
       {/if}
     {:else if tab === 'tasks'}
       <TasksTab onOpenSession={(id) => { tab = 'chat'; openSession(id, 'running') }} />
@@ -74,7 +85,7 @@
   </main>
 
   <nav class="m-tabbar">
-    <button class="m-tab" class:on={tab === 'chat'} onclick={() => { tab = 'chat'; closeDetail() }}>
+    <button class="m-tab" class:on={tab === 'chat'} onclick={() => { tab = 'chat'; closeDetail(); history = null }}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>
       <span>{$t('m.tab_sessions')}</span>
     </button>

@@ -4,7 +4,12 @@
   import DeviceBanner from './DeviceBanner.svelte'
   import { t } from '../lib/i18n'
 
-  let { onOpen, onNew }: { onOpen: (id: string, kind: FeedKind) => void; onNew: () => void } = $props()
+  let { onOpen, onNew, onHistory }: {
+    onOpen: (id: string, kind: FeedKind) => void
+    onNew: () => void
+    // Opens the history page: focused for search, unfocused for "view all".
+    onHistory: (focus: boolean) => void
+  } = $props()
 
   const groups = feedGroups
   const empty = $derived($groups.todo.length + $groups.active.length + $groups.recent.length === 0)
@@ -12,7 +17,7 @@
 
 <header class="head">
   <h1>{$t('m.tab_sessions')}</h1>
-  <button class="search" aria-label={$t('m.search')}>
+  <button class="search" aria-label={$t('m.search')} onclick={() => onHistory(true)}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-2)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
   </button>
 </header>
@@ -43,6 +48,11 @@
     {#each $groups.recent as item (item.session.id)}
       <SessionCard {item} {onOpen} />
     {/each}
+    {#if $groups.recentTotal > $groups.recent.length}
+      <button class="all" onclick={() => onHistory(false)}>
+        {$t('m.view_all').replace('{n}', String($groups.recentTotal))}
+      </button>
+    {/if}
   {/if}
 </div>
 
@@ -83,6 +93,17 @@
     letter-spacing: .5px;
     text-transform: uppercase;
     color: var(--m-text-3);
+  }
+  .all {
+    display: block;
+    margin: 4px auto 0;
+    padding: 10px 18px;
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: 13px;
+    color: var(--m-accent);
+    cursor: pointer;
   }
   .empty {
     padding: 40px 16px;

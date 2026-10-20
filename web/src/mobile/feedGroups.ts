@@ -4,7 +4,8 @@
 //             needs-reply (an outstanding ask_user_question, Session.pending_question)
 //   Active  — the agent is working
 //   Recent  — everything else, newest first, capped
-// Within each section, pinned sessions float to the top.
+// Within each section, pinned sessions float to the top. The full list, for
+// the history / search page, is allSessions.
 import { derived } from 'svelte/store'
 import { sessions } from '../lib/stores'
 import { updatedAtMs } from '../lib/unread'
@@ -19,6 +20,8 @@ export interface FeedGroups {
   todo: FeedItem[]
   active: FeedItem[]
   recent: FeedItem[]
+  /** Size of Recent before the cap, so the feed knows there is more. */
+  recentTotal: number
 }
 
 // Cap the Recent section; the full history lives behind a second-level page.
@@ -31,6 +34,15 @@ function byPinThenRecent(a: FeedItem, b: FeedItem): number {
   return updatedAtMs(b.session) - updatedAtMs(a.session)
 }
 
+function kindOf(s: Session): FeedKind {
+  // pending_confirmation is server-fed (session_activity confirm_pending /
+  // session list), so the feed sees it without subscribing to the session.
+  if (s.pending_confirmation) return 'approval'
+  if (s.pending_question) return 'reply'
+  if (s.status === 'running') return 'running'
+  return 'done'
+}
+
 export const feedGroups = derived(
   sessions,
   ($sessions): FeedGroups => {
@@ -39,18 +51,29 @@ export const feedGroups = derived(
     const recent: FeedItem[] = []
 
     for (const s of $sessions) {
-      // pending_confirmation is server-fed (session_activity confirm_pending /
-      // session list), so the feed sees it without subscribing to the session.
-      if (s.pending_confirmation) todo.push({ session: s, kind: 'approval' })
-      else if (s.pending_question) todo.push({ session: s, kind: 'reply' })
-      else if (s.status === 'running') active.push({ session: s, kind: 'running' })
-      else recent.push({ session: s, kind: 'done' })
+      const item = { session: s, kind: kindOf(s) }
+      if (item.kind === 'approval' || item.kind === 'reply') todo.push(item)
+      else if (item.kind === 'running') active.push(item)
+      else recent.push(item)
     }
 
     todo.sort(byPinThenRecent)
     active.sort(byPinThenRecent)
     recent.sort(byPinThenRecent)
 
-    return { todo, active, recent: recent.slice(0, RECENT_CAP) }
+    return { todo, active, recent: recent.slice(0, RECENT_CAP), recentTotal: recent.length }
   },
 )
+
+// Every session, pinned first then newest — the history / search page.
+export const allSessions = derived(sessions, ($sessions): FeedItem[] =>
+  $sessions.map((s) => ({ session: s, kind: kindOf(s) })).sort(byPinThenRecent),
+)
+
+// matchesQuery is the search filter: a case-insensitive substring of the title
+// (or name, for an untitled session). An empty query matches everything.
+export function matchesQuery(s: Session, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return (s.title || s.name || '').toLowerCase().includes(q)
+}
