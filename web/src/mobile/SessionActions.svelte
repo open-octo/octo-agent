@@ -12,6 +12,16 @@
     sessionActionsFor.set(null)
   }
 
+  // A session deleted while its sheet is open would otherwise leave the id
+  // behind, and the sheet would pop back if a refetch briefly restored it.
+  $effect(() => {
+    if (id && !session) close()
+  })
+
+  function onKeydown(e: KeyboardEvent) {
+    if (id && e.key === 'Escape') close()
+  }
+
   // The long press that opened the sheet ends with a click at the finger's
   // position, which now lands on the sheet or its backdrop — on a card near
   // the bottom, right on an action. Only a tap that also started inside the
@@ -36,6 +46,8 @@
     void togglePin(target, next)
   }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 {#if session}
   <div class="backdrop" role="presentation" onpointerdown={() => (pressed = true)} onclick={tapped(close)}></div>

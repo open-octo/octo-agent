@@ -28,6 +28,9 @@
   let startX = 0
   let startY = 0
   let longPressed = false
+  // A card can unmount mid-press (its session changes section); drop the timer
+  // with it.
+  $effect(() => () => clearTimeout(timer))
 
   function openActions() {
     clearTimeout(timer)
@@ -46,11 +49,18 @@
     if (Math.abs(e.clientX - startX) > MOVE_TOLERANCE || Math.abs(e.clientY - startY) > MOVE_TOLERANCE) clearTimeout(timer)
   }
   function onClick() {
-    if (longPressed) return
+    // Swallow only the one click that ends the long press, so a later
+    // keyboard activation (no pointerdown to reset it) still opens.
+    if (longPressed) {
+      longPressed = false
+      return
+    }
     onOpen(s.id, item.kind)
   }
   function onContextMenu(e: MouseEvent) {
     e.preventDefault()
+    // A keyboard context-menu key comes with no pointerdown either.
+    longPressed = false
     openActions()
   }
 </script>
@@ -70,7 +80,7 @@
   <div class="top">
     <span class="head">
       {#if pinned}
-        <svg class="pin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label={$t('m.pinned')}><path d="M12 17v5M9 10.8V4h6v6.8l3 3.2v2H6v-2z"/></svg>
+        <svg class="pin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" role="img" aria-label={$t('m.pinned')}><path d="M12 17v5M9 10.8V4h6v6.8l3 3.2v2H6v-2z"/></svg>
       {/if}
       <span class="title">{title}</span>
     </span>
