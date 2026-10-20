@@ -262,8 +262,11 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	}
 
 	if err := c.sendRecoveringSession(ctx, msg); err != nil {
-		// Given up on mid-send — a streamed response cut off by an interrupt or
-		// timeout — the server has the request and is working on it.
+		// Given up on mid-send — e.g. a streamed response cut off by an
+		// interrupt or timeout — the server may well have the request and be
+		// working on it. Failures known to precede the write are notSentError;
+		// for the rest a cancellation of an id the server never saw is
+		// harmless, as the spec has receivers ignore unknown ids.
 		var ns notSentError
 		if ctx.Err() != nil && !errors.As(err, &ns) {
 			c.cancelRequest(ctx, method, idBytes)
@@ -303,16 +306,19 @@ var cancelNotifyTimeout = 5 * time.Second
 //
 // ctx is the request's own, already done; its cause becomes the reason. The
 // notification goes out in the background on a fresh deadline: the caller is
-// returning its error now and shouldn't wait on the server to do so. Any
-// response that still arrives finds no pending entry and is dropped, as the
-// spec asks.
+// returning its error now and shouldn't wait on the server to do so. It is a
+// best-effort send (see withBestEffort) — a user who just interrupted an
+// authorization prompt must not get another one for this. Any response that
+// still arrives finds no pending entry and is dropped, as the spec asks.
 func (c *Client) cancelRequest(ctx context.Context, method string, id json.RawMessage) {
 	if method == MethodInitialize {
 		return // the spec forbids cancelling initialize
 	}
 	params := CancelledParams{RequestID: id, Reason: context.Cause(ctx).Error()}
 	go func() {
-		nctx, cancel := context.WithTimeout(context.Background(), cancelNotifyTimeout)
+		// Detached, with nothing above it to recover a panic.
+		defer func() { _ = panics.Error(recover(), "mcp cancel notification", "method", method) }()
+		nctx, cancel := context.WithTimeout(withBestEffort(context.Background()), cancelNotifyTimeout)
 		defer cancel()
 		_ = c.Notify(nctx, MethodCancelled, params)
 	}()

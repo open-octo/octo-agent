@@ -195,13 +195,27 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 	}
 
 	// Bearer-token injection from OAuth provider, if configured.
-	if t.oauth != nil {
+	bestEffort := isBestEffort(ctx)
+	if t.oauth != nil && bestEffort {
+		// Never escalate to refresh or a browser prompt for a send nobody is
+		// waiting on: the cached token or nothing.
+		tok := ""
+		if cp, ok := t.oauth.(cachedTokenProvider); ok {
+			tok = cp.CachedToken()
+		}
+		if tok == "" {
+			return false, nil, notSentError{errors.New("mcp: no cached oauth token for a best-effort send")}
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+	} else if t.oauth != nil {
 		if forceFreshToken {
 			t.oauth.Invalidate()
 		}
 		tok, terr := t.oauth.Token(ctx)
 		if terr != nil {
-			return false, nil, fmt.Errorf("mcp: oauth token: %w", terr)
+			// Nothing has gone out yet — an interrupt during an authorization
+			// prompt lands here, and there is no request to cancel.
+			return false, nil, notSentError{fmt.Errorf("mcp: oauth token: %w", terr)}
 		}
 		if tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
@@ -249,7 +263,7 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		// If we have OAuth and this isn't already our second attempt, ask
 		// the caller to retry with a fresh token. The provider's
 		// Invalidate is what makes the next Token() do real work.
-		if t.oauth != nil && !forceFreshToken {
+		if t.oauth != nil && !forceFreshToken && !bestEffort {
 			return true, nil, errors.New("mcp: http 401, will retry")
 		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -262,6 +276,14 @@ func (t *HTTPTransport) doRequest(ctx context.Context, msg *Message, forceFreshT
 		// report it as the typed error Client watches for. A 404 on a request
 		// with no session id is an ordinary wrong-endpoint error and falls
 		// through below.
+		//
+		// A best-effort send leaves the session alone and is not reported as
+		// an expiry: it must not trigger a recovery handshake of its own, and
+		// clearing the session without one would send every later request
+		// out with no session id at all.
+		if bestEffort {
+			return false, nil, fmt.Errorf("mcp: http 404 to a best-effort %s", msg.Method)
+		}
 		t.forgetSession(sentSession)
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return false, nil, fmt.Errorf("%w: %s", ErrSessionExpired, bytes.TrimSpace(b))
@@ -341,6 +363,22 @@ const maxSSEResumeAttempts = 3
 // for it and recovers by re-running the handshake and replaying the request
 // once; callers of Call therefore never normally see it.
 var ErrSessionExpired = errors.New("mcp: session expired")
+
+type bestEffortKey struct{}
+
+// withBestEffort marks a send as one nobody waits on (a cancellation): the
+// HTTP transport then uses only a cached OAuth token, never retries a 401,
+// and treats a 404 as a plain failure rather than a session expiry to
+// recover from. Losing such a send costs nothing; prompting the user,
+// re-handshaking, or wiping the session for it would.
+func withBestEffort(ctx context.Context) context.Context {
+	return context.WithValue(ctx, bestEffortKey{}, true)
+}
+
+func isBestEffort(ctx context.Context) bool {
+	v, _ := ctx.Value(bestEffortKey{}).(bool)
+	return v
+}
 
 // streamSession is the session a response stream belongs to. A resume
 // request carries it, not whatever is current: by then another sender may
