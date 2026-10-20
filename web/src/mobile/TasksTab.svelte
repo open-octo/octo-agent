@@ -1,3 +1,11 @@
+<script lang="ts" module>
+  import type { TaskResponse } from '../lib/api'
+  // Outlives the component, which MobileApp unmounts on every tab switch:
+  // coming back shows the last list at once and refreshes underneath, rather
+  // than a loading screen for a round trip that may cross a tunnel.
+  let cached: TaskResponse[] | null = null
+</script>
+
 <script lang="ts">
   // Tasks tab: scheduled (cron) tasks as mobile cards — stat chips up top, then
   // one card per task with an enable switch and a run-now action. Management
@@ -11,9 +19,12 @@
 
   let { onOpenSession }: { onOpenSession: (id: string) => void } = $props()
 
-  let loading = $state(true)
+  let loading = $state(cached === null)
   let loadError = $state(false)
-  let tasks = $state<api.TaskResponse[]>([])
+  let tasks = $state<api.TaskResponse[]>(cached ?? [])
+  $effect(() => {
+    if (!loading && !loadError) cached = tasks
+  })
   const activeCount = $derived(tasks.filter(t => t.enabled).length)
 
   function fmtDate(iso: string): string {
@@ -28,12 +39,13 @@
   }
 
   async function load() {
-    loading = true
+    loading = cached === null
     loadError = false
     try {
       tasks = await api.listTasks()
     } catch (e: any) {
-      loadError = true
+      // A failed background refresh keeps the cached list on screen.
+      loadError = cached === null
       showToast(e?.message ?? tr('m.tasks_load_fail'), 'error')
     } finally {
       loading = false

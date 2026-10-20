@@ -1,16 +1,6 @@
-<script lang="ts">
-  // Config tab: the server's capability inventory — Light Apps, skills, MCP
-  // servers, workflows, memories, trash — as a root list drilling into
-  // per-kind sections. Remote-control scope: Light Apps open full-screen,
-  // skills/MCP get enable switches, the rest are read-only inventories;
-  // installing/editing stays on desktop.
-  import { onMount } from 'svelte'
-  import { showToast } from '../lib/stores'
-  import * as api from '../lib/api'
-  import { t, tr } from '../lib/i18n'
+<script lang="ts" module>
+  import type { LightApp } from '../lib/api'
   import type { Skill, Workflow, Memory } from '../lib/types'
-  import PageViewer from './PageViewer.svelte'
-  import { pageSrc } from './pageURL'
 
   // The trash endpoint's real wire shape ({ files: [...] }); api.listTrash's
   // declared RecallFile[] doesn't match it (the desktop view casts around the
@@ -35,6 +25,33 @@
     status: 'connected' | 'error' | 'disabled' | 'invalid' | 'disconnected'
     tools: number
   }
+
+  // Outlives the component, which MobileApp unmounts on every tab switch:
+  // coming back shows the last inventory at once and refreshes underneath,
+  // rather than a loading screen for six round trips that may cross a tunnel.
+  let cached: {
+    apps: LightApp[]
+    skills: Skill[]
+    mcp: McpInfo[]
+    workflows: Workflow[]
+    memories: Memory[]
+    trash: TrashEntry[]
+  } | null = null
+</script>
+
+<script lang="ts">
+  // Config tab: the server's capability inventory — Light Apps, skills, MCP
+  // servers, workflows, memories, trash — as a root list drilling into
+  // per-kind sections. Remote-control scope: Light Apps open full-screen,
+  // skills/MCP get enable switches, the rest are read-only inventories;
+  // installing/editing stays on desktop.
+  import { onMount } from 'svelte'
+  import { showToast } from '../lib/stores'
+  import * as api from '../lib/api'
+  import { t, tr } from '../lib/i18n'
+  import PageViewer from './PageViewer.svelte'
+  import { pageSrc } from './pageURL'
+
   const mcpStatusKey: Record<McpInfo['status'], string> = {
     connected: 'm.mcp_connected', error: 'm.mcp_error', disabled: 'm.mcp_disabled',
     invalid: 'm.mcp_invalid', disconnected: 'm.mcp_disconnected',
@@ -43,17 +60,20 @@
   type Section = 'root' | 'apps' | 'skills' | 'mcp' | 'workflows' | 'memory' | 'trash'
   let section = $state<Section>('root')
 
-  let loading = $state(true)
+  let loading = $state(cached === null)
   let loadError = $state(false)
-  let skills = $state<Skill[]>([])
-  let mcp = $state<McpInfo[]>([])
-  let workflows = $state<Workflow[]>([])
-  let memories = $state<Memory[]>([])
-  let trash = $state<TrashEntry[]>([])
-  let apps = $state<api.LightApp[]>([])
+  let skills = $state<Skill[]>(cached?.skills ?? [])
+  let mcp = $state<McpInfo[]>(cached?.mcp ?? [])
+  let workflows = $state<Workflow[]>(cached?.workflows ?? [])
+  let memories = $state<Memory[]>(cached?.memories ?? [])
+  let trash = $state<TrashEntry[]>(cached?.trash ?? [])
+  let apps = $state<api.LightApp[]>(cached?.apps ?? [])
+  $effect(() => {
+    if (!loading && !loadError) cached = { apps, skills, mcp, workflows, memories, trash }
+  })
 
   async function load() {
-    loading = true
+    loading = cached === null
     loadError = false
     const [la, sk, mc, wf, me, trs] = await Promise.all([
       api.listLightApps().catch(() => null),
@@ -71,7 +91,8 @@
     if (trs) trash = ((trs as any).files ?? trs ?? []) as TrashEntry[]
     const results = [la, sk, mc, wf, me, trs]
     const failed = results.filter(r => !r).length
-    loadError = failed === results.length
+    // A failed background refresh keeps the cached inventory on screen.
+    loadError = failed === results.length && cached === null
     if (failed > 0 && failed < results.length) showToast(tr('m.partial_load_fail'), 'error')
     loading = false
   }
