@@ -78,6 +78,20 @@ octo serve -addr :8088 --access-key <key>
 
 完整的安全边界——防住了什么、明确不管什么——见[安全模型](/docs/zh/reference/security/)。
 
+## 连接手机 App
+
+iOS / Android App（开发者预览，需从源码构建，见
+[`mobile/`](https://github.com/open-octo/octo-agent/tree/main/mobile)）直连这个服务，中间没有中继。
+手机怎么连到服务，交给你的网络：
+
+- **同一局域网**：用 `octo serve -addr 0.0.0.0:8088` 启动。
+- **在外面**：保持回环绑定，前面套一层 Tailscale（`tailscale serve`）、cloudflared 或任意隧道、反向代理。
+
+然后打开 Web UI 的**设置 → 手机**。这里会列出服务的局域网地址，也可以填任意地址（Tailscale 域名、
+隧道 URL），并把"地址 + 访问密钥"显示成二维码，内容就是启动时打印的那个 `?access_key=` 链接。
+在 App 里扫码或粘贴链接即可。二维码带着密钥，请像对待密钥本身一样对待它。支持明文 `http://`；
+App 没有推送，打开时同步。
+
 ## 重启
 
 默认情况下 `octo serve` 是**supervisor + worker** 两进程结构：supervisor 启动真正干活的 worker

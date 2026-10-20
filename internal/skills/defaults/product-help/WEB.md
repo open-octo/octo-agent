@@ -55,6 +55,15 @@ not switch profiles: that restarts the backend, so it lives in the desktop tray 
 `octo serve --profile <name>` launch. CLI twin: `octo profiles` (`CLI.md`); guide:
 **https://octo-agent.dev/docs/guides/profiles/**.
 
+## Settings → Mobile
+
+Pairs the mobile app (iOS / Android, developer preview, built from source) with this server. The app
+connects directly — no relay — so the phone must be able to reach the server: `octo serve -addr
+0.0.0.0:8088` for the LAN, or Tailscale / cloudflared / any tunnel in front. The panel lists the
+server's LAN addresses or takes any typed address, and shows a QR of `<address>/?access_key=<key>`;
+the app scans it or takes the link pasted. When the server only listens on loopback the panel says
+so. No push notifications. Guide: **https://octo-agent.dev/docs/guides/self-host/** (`web_fetch`).
+
 ## The start screen
 
 The new-session page (four starter cards, optional hero, Light App shortcut chips) is customizable

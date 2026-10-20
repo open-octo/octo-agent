@@ -95,6 +95,22 @@ persists one — startup prints a ready-to-open URL with the key embedded
 See the full boundary — what's defended, what's explicitly out of scope — in the
 [security model](/docs/reference/security/).
 
+## Connecting the mobile app
+
+The iOS / Android app (developer preview, built from source — see
+[`mobile/`](https://github.com/open-octo/octo-agent/tree/main/mobile)) connects straight to this
+server; there is no relay in between. Getting the phone to the server is your network's job:
+
+- **Same LAN** — start with `octo serve -addr 0.0.0.0:8088`.
+- **Anywhere else** — keep the loopback bind and put Tailscale (`tailscale serve`), cloudflared or any
+  other tunnel or reverse proxy in front.
+
+Then open **Settings → Mobile** in the web UI. It lists the server's LAN addresses, or takes any
+address you type (a Tailscale name, a tunnel URL), and shows a QR of that address plus the access
+key — the same `?access_key=` link startup prints. Scan it in the app, or paste the link. The QR
+carries the key, so treat it like the key itself. Plain `http://` works; the app has no push
+notifications and syncs when opened.
+
 ## Restarting
 
 By default `octo serve` runs as a **supervisor + worker** pair: the supervisor spawns the actual
