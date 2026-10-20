@@ -157,11 +157,11 @@ func TestCallTool_SendsNoProgressToken(t *testing.T) {
 
 func TestCallToolProgress_ReportsExtendTheIdleTimeout(t *testing.T) {
 	old := defaultCallTimeout
-	defaultCallTimeout = 150 * time.Millisecond
+	defaultCallTimeout = 300 * time.Millisecond
 	defer func() { defaultCallTimeout = old }()
 
-	// 8 reports × 60ms ≈ 480ms total: far past one idle window, but never
-	// silent for a whole one.
+	// 8 reports × 60ms ≈ 480ms total: past one idle window, but never silent
+	// for anywhere near a whole one.
 	s := &progressServer{reports: 8, gap: 60 * time.Millisecond}
 	c := startProgressServer(t, s)
 
@@ -192,22 +192,36 @@ func TestCallToolProgress_SilenceTimesOut(t *testing.T) {
 
 func TestCallToolProgress_MaxTimeoutCapsReporting(t *testing.T) {
 	oldIdle, oldMax := defaultCallTimeout, maxProgressCallTimeout
-	defaultCallTimeout = 150 * time.Millisecond
-	maxProgressCallTimeout = 200 * time.Millisecond
+	defaultCallTimeout = 300 * time.Millisecond
+	maxProgressCallTimeout = 400 * time.Millisecond
 	defer func() { defaultCallTimeout, maxProgressCallTimeout = oldIdle, oldMax }()
 
 	// Reports every 50ms keep the idle window open indefinitely; only the
 	// overall cap can end this call.
-	s := &progressServer{reports: 20, gap: 50 * time.Millisecond}
+	s := &progressServer{reports: 40, gap: 50 * time.Millisecond}
 	c := startProgressServer(t, s)
 
 	start := time.Now()
 	_, err := c.CallToolProgress(context.Background(), "chatty", nil, func(ProgressParams) {})
-	if !errors.Is(err, context.DeadlineExceeded) {
+	if !errors.Is(err, errProgressCap) {
 		t.Fatalf("err = %v, want the overall cap", err)
 	}
-	if el := time.Since(start); el > 700*time.Millisecond {
-		t.Errorf("returned after %s; the cap is 200ms", el)
+	if el := time.Since(start); el > 1500*time.Millisecond {
+		t.Errorf("returned after %s; the cap is 400ms", el)
+	}
+}
+
+func TestCallToolProgress_CallerDeadlineIsNotExtended(t *testing.T) {
+	// Reports every 50ms would keep an idle window alive; a deadline the
+	// caller chose must still end the call.
+	s := &progressServer{reports: 40, gap: 50 * time.Millisecond}
+	c := startProgressServer(t, s)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, err := c.CallToolProgress(ctx, "chatty", nil, func(ProgressParams) {})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the caller's deadline", err)
 	}
 }
 

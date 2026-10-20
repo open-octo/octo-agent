@@ -27,6 +27,8 @@ func TestProgressLines(t *testing.T) {
 		{"no message, no total", mcp.ProgressParams{Progress: 3}, []string{"progress 3"}},
 		{"multi-line output", mcp.ProgressParams{Progress: 1, Message: "line one\r\nline two\n"}, []string{"line one", "line two"}},
 		{"multi-line with total", mcp.ProgressParams{Progress: 2, Total: &total, Message: "a\nb"}, []string{"a", "b (2/4)"}},
+		{"carriage-return redraw", mcp.ProgressParams{Progress: 1, Message: "10%\r50%\r90%"}, []string{"90%"}},
+		{"escape sequences", mcp.ProgressParams{Progress: 1, Message: "\x1b[31mred\x1b[0m \x1b]0;pwned\x07ok"}, []string{"red ok"}},
 	}
 	for _, c := range cases {
 		if got := progressLines(c.p); !reflect.DeepEqual(got, c.want) {

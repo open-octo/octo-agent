@@ -218,6 +218,16 @@ func progressLines(p mcp.ProgressParams) []string {
 		return []string{"progress " + count}
 	}
 	lines := strings.Split(strings.ReplaceAll(msg, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		// A lone \r is a progress bar redrawing its own line; only what a
+		// terminal would end up showing — the last segment — is kept.
+		if j := strings.LastIndexByte(line, '\r'); j >= 0 {
+			line = line[j+1:]
+		}
+		// The message is remote, untrusted text headed for a terminal —
+		// stripped the same way the terminal tool strips its own output.
+		lines[i] = string(stripANSI([]byte(line)))
+	}
 	if p.Total != nil {
 		lines[len(lines)-1] += " (" + count + ")"
 	}

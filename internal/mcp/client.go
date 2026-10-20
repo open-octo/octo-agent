@@ -626,6 +626,10 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 // goes a full idle window with neither a response nor a progress report.
 var errProgressIdle = errors.New("no response or progress report")
 
+// errProgressCap is the cause when a call that kept reporting progress still
+// hit maxProgressCallTimeout.
+var errProgressCap = errors.New("still running at the overall limit")
+
 // CallToolProgress is CallTool for a caller that wants the server's progress
 // reports: it sends a progressToken and passes each notifications/progress
 // for it to onProgress, in arrival order, on the calling goroutine. A nil
@@ -655,7 +659,7 @@ func (c *Client) CallToolProgress(ctx context.Context, name string, args map[str
 	idle := func() {}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancelMax context.CancelFunc
-		ctx, cancelMax = context.WithTimeout(ctx, maxProgressCallTimeout)
+		ctx, cancelMax = context.WithTimeoutCause(ctx, maxProgressCallTimeout, errProgressCap)
 		defer cancelMax()
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)
@@ -698,6 +702,9 @@ func (c *Client) CallToolProgress(ctx context.Context, name string, args map[str
 			if o.err != nil {
 				if errors.Is(context.Cause(ctx), errProgressIdle) {
 					return nil, fmt.Errorf("mcp: tools/call %s: %w within %s", name, errProgressIdle, defaultCallTimeout)
+				}
+				if errors.Is(context.Cause(ctx), errProgressCap) {
+					return nil, fmt.Errorf("mcp: tools/call %s: %w of %s", name, errProgressCap, maxProgressCallTimeout)
 				}
 				return nil, o.err
 			}
