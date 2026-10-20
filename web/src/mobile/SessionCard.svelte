@@ -1,5 +1,7 @@
 <script lang="ts">
   import { projectOf, type FeedItem, type FeedKind } from './feedGroups'
+  import { sessionActionsFor } from './sessionActions'
+  import { pinnedSessions } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { ago, clockTick } from '../lib/relTime'
 
@@ -14,16 +16,64 @@
   const s = $derived(item.session)
   const title = $derived(s.title || s.name || $t('m.untitled'))
   const project = $derived(showProject ? $projectOf.get(s.id) : undefined)
+  const pinned = $derived($pinnedSessions.includes(s.id))
+
+  // Long press opens the session's action sheet. A timer covers iOS, whose
+  // WebView fires no contextmenu on touch; Android's WebView fires contextmenu
+  // on a long press, which opens the sheet too — whichever comes first wins.
+  // The click that ends a long press must not also open the session.
+  const LONG_PRESS_MS = 500
+  const MOVE_TOLERANCE = 10
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let startX = 0
+  let startY = 0
+  let longPressed = false
+
+  function openActions() {
+    clearTimeout(timer)
+    if (longPressed) return
+    longPressed = true
+    sessionActionsFor.set(s.id)
+  }
+  function onDown(e: PointerEvent) {
+    longPressed = false
+    startX = e.clientX
+    startY = e.clientY
+    clearTimeout(timer)
+    timer = setTimeout(openActions, LONG_PRESS_MS)
+  }
+  function onMove(e: PointerEvent) {
+    if (Math.abs(e.clientX - startX) > MOVE_TOLERANCE || Math.abs(e.clientY - startY) > MOVE_TOLERANCE) clearTimeout(timer)
+  }
+  function onClick() {
+    if (longPressed) return
+    onOpen(s.id, item.kind)
+  }
+  function onContextMenu(e: MouseEvent) {
+    e.preventDefault()
+    openActions()
+  }
 </script>
 
 <button
   class="card"
   class:approval={item.kind === 'approval'}
   class:reply={item.kind === 'reply'}
-  onclick={() => onOpen(s.id, item.kind)}
+  onclick={onClick}
+  onpointerdown={onDown}
+  onpointermove={onMove}
+  onpointerup={() => clearTimeout(timer)}
+  onpointercancel={() => clearTimeout(timer)}
+  onpointerleave={() => clearTimeout(timer)}
+  oncontextmenu={onContextMenu}
 >
   <div class="top">
-    <span class="title">{title}</span>
+    <span class="head">
+      {#if pinned}
+        <svg class="pin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label={$t('m.pinned')}><path d="M12 17v5M9 10.8V4h6v6.8l3 3.2v2H6v-2z"/></svg>
+      {/if}
+      <span class="title">{title}</span>
+    </span>
     {#if item.kind === 'reply'}
       <span class="tag tag-accent">{$t('m.tag_reply')}</span>
     {:else if item.kind === 'approval'}
@@ -65,7 +115,13 @@
     cursor: pointer;
     font-family: inherit;
     box-shadow: var(--m-shadow-card);
+    /* Keep a long press from selecting text or raising iOS's link callout. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
+  .head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .pin { flex: none; color: var(--m-text-3); }
   .card.approval { border-color: var(--m-tag-warn-border); }
   .card.reply { border-color: var(--m-accent); }
   .top {

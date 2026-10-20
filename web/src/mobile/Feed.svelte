@@ -13,7 +13,7 @@
   } = $props()
 
   const groups = feedGroups
-  const empty = $derived($groups.todo.length + $groups.active.length + $groups.projects.length + $groups.recent.length === 0)
+  const empty = $derived($groups.todo.length + $groups.active.length + $groups.pinned.length + $groups.projects.length + $groups.recent.length === 0)
 </script>
 
 <header class="head">
@@ -40,6 +40,13 @@
   {#if $groups.active.length}
     <p class="lbl">{$t('m.sec_active')}</p>
     {#each $groups.active as item (item.session.id)}
+      <SessionCard {item} {onOpen} />
+    {/each}
+  {/if}
+
+  {#if $groups.pinned.length}
+    <p class="lbl">{$t('m.sec_pinned')}</p>
+    {#each $groups.pinned as item (item.session.id)}
       <SessionCard {item} {onOpen} />
     {/each}
   {/if}

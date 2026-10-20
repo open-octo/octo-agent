@@ -13,6 +13,7 @@
   import ConfigTab from './ConfigTab.svelte'
   import NewTask from './NewTask.svelte'
   import ProjectSessions from './ProjectSessions.svelte'
+  import SessionActions from './SessionActions.svelte'
   import QuestionOverlay from './QuestionOverlay.svelte'
   import type { FeedKind } from './feedGroups'
   import { onMount } from 'svelte'
@@ -135,6 +136,7 @@
   <!-- Cross-client ask: with global broadcast, a question from any session
        (desktop or mobile) reaches every connected client. -->
   <QuestionOverlay />
+  <SessionActions />
 </div>
 
 <style>

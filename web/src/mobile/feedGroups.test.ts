@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { get } from 'svelte/store'
-import { sessions, sessionGroups } from '../lib/stores'
+import { sessions, sessionGroups, pinnedSessions } from '../lib/stores'
 import { feedGroups, allSessions, matchesQuery, projectOf } from './feedGroups'
 import type { Session, SessionGroup } from '../lib/types'
 
@@ -81,16 +81,63 @@ describe('feedGroups projects', () => {
   })
 })
 
+describe('feedGroups pinned', () => {
+  beforeEach(() => {
+    sessions.set([])
+    sessionGroups.set([])
+    pinnedSessions.set([])
+  })
+
+  it('moves pinned done sessions out of Recent into Pinned, in pin order', () => {
+    sessions.set([mk('a', 1), mk('b', 2), mk('c', 3)])
+    pinnedSessions.set(['c', 'a'])
+    const g = get(feedGroups)
+    expect(g.pinned.map((i) => i.session.id)).toEqual(['c', 'a'])
+    expect(g.recent.map((i) => i.session.id)).toEqual(['b'])
+  })
+
+  it('keeps a pinned session that needs you in To-do or Active, not Pinned', () => {
+    sessions.set([
+      mk('ask', 1, { pending_question: true } as Partial<Session>),
+      mk('run', 2, { status: 'running' } as Partial<Session>),
+    ])
+    pinnedSessions.set(['ask', 'run'])
+    const g = get(feedGroups)
+    expect(g.pinned).toEqual([])
+    expect(g.todo.map((i) => i.session.id)).toEqual(['ask'])
+    expect(g.active.map((i) => i.session.id)).toEqual(['run'])
+  })
+
+  it('keeps a pinned project session on its project page, pinned first', () => {
+    sessions.set([mk('a', 1), mk('b', 2)])
+    sessionGroups.set([{ id: 'p', name: 'P', session_ids: ['a', 'b'], working_dir: '/w/p' }])
+    pinnedSessions.set(['b'])
+    const g = get(feedGroups)
+    expect(g.pinned.map((i) => i.session.id)).toEqual(['b'])
+    expect(g.projects[0].items.map((i) => i.session.id)).toEqual(['b', 'a'])
+  })
+
+  it('follows the registry, not the session list flag', () => {
+    sessions.set([mk('a', 1, { pinned: true } as Partial<Session>)])
+    expect(get(feedGroups).pinned).toEqual([])
+    expect(get(feedGroups).recent.map((i) => i.session.id)).toEqual(['a'])
+  })
+})
+
 describe('allSessions', () => {
-  beforeEach(() => sessions.set([]))
+  beforeEach(() => {
+    sessions.set([])
+    pinnedSessions.set([])
+  })
 
   it('lists every session, pinned first then newest, with its kind', () => {
     sessions.set([
       mk('old', 30),
       mk('new', 1),
-      mk('pinned', 60, { pinned: true } as Partial<Session>),
+      mk('pinned', 60),
       mk('ask', 5, { pending_confirmation: true } as Partial<Session>),
     ])
+    pinnedSessions.set(['pinned'])
     const all = get(allSessions)
     expect(all.map((i) => i.session.id)).toEqual(['pinned', 'new', 'ask', 'old'])
     expect(all.find((i) => i.session.id === 'ask')?.kind).toBe('approval')
