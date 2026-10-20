@@ -1,21 +1,29 @@
 <script lang="ts">
-  // New-task sheet, opened by the feed's FAB. The phone fires a task in one
-  // step: describe it, optionally pick model / permission mode / working
-  // and land in the streaming chat detail. A task takes no working directory:
-  // that belongs to a project, which is where memory is scoped too. Leaving the prompt
-  // empty just creates a blank session (the old FAB behavior).
+  // New-task sheet, opened by the feed's FAB or a project page's. The phone
+  // fires a task in one step: describe it, optionally pick project / model /
+  // permission mode, and land in the streaming chat detail. A task takes no
+  // working directory of its own: that belongs to a project, which is where
+  // memory is scoped too. Leaving the prompt empty just creates a blank session
+  // (the old FAB behavior).
   import { get } from 'svelte/store'
-  import { sessions, activeSessionId, globalPermissionMode, showToast } from '../lib/stores'
+  import { sessions, sessionGroups, activeSessionId, globalPermissionMode, showToast } from '../lib/stores'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
 
-  let { onCancel, onCreated }: {
+  // groupId preselects a project: set when opened from that project's page.
+  let { onCancel, onCreated, groupId = '' }: {
     onCancel: () => void
     onCreated: (id: string, prompt: string) => void
+    groupId?: string
   } = $props()
 
   let prompt = $state('')
   let creating = $state(false)
+
+  // '' = no project, a loose session.
+  // svelte-ignore state_referenced_locally
+  let projectId = $state(groupId)
+  const projects = $derived($sessionGroups.filter(g => !!g.working_dir))
 
   // '' = the server default sender; anything else is the composite
   // "<endpoint>::<model>" id updateSessionModel resolves.
@@ -56,8 +64,13 @@
     if (creating) return
     creating = true
     try {
-      const sess = await api.createSession({ source: 'manual' })
+      const sess = await api.createSession({ source: 'manual', ...(projectId ? { group_id: projectId } : {}) })
       sessions.update(ss => [sess, ...ss])
+      // The server filed it under the project; refetch so the feed and the
+      // project page place it there without waiting for the groups broadcast.
+      if (projectId) {
+        api.listSessionGroups().then(org => sessionGroups.set(org.groups)).catch(() => {})
+      }
       activeSessionId.set(sess.id)
       // Best-effort per-session overrides: a failed override shouldn't strand
       // the already-created session, so toast and continue.
@@ -97,6 +110,18 @@
       bind:value={prompt}
     ></textarea>
   </div>
+
+  {#if projects.length}
+    <p class="lbl">{$t('m.project')}</p>
+    <div class="card pad">
+      <select class="select" bind:value={projectId} aria-label={$t('m.project')}>
+        <option value="">{$t('m.no_project')}</option>
+        {#each projects as p (p.id)}
+          <option value={p.id}>{p.name}</option>
+        {/each}
+      </select>
+    </div>
+  {/if}
 
   <p class="lbl">{$t('m.model')}</p>
   <div class="card pad">

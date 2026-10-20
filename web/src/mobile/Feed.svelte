@@ -4,15 +4,16 @@
   import DeviceBanner from './DeviceBanner.svelte'
   import { t } from '../lib/i18n'
 
-  let { onOpen, onNew, onHistory }: {
+  let { onOpen, onNew, onHistory, onProject }: {
     onOpen: (id: string, kind: FeedKind) => void
     onNew: () => void
+    onProject: (groupId: string) => void
     // Opens the history page: focused for search, unfocused for "view all".
     onHistory: (focus: boolean) => void
   } = $props()
 
   const groups = feedGroups
-  const empty = $derived($groups.todo.length + $groups.active.length + $groups.recent.length === 0)
+  const empty = $derived($groups.todo.length + $groups.active.length + $groups.projects.length + $groups.recent.length === 0)
 </script>
 
 <header class="head">
@@ -41,6 +42,20 @@
     {#each $groups.active as item (item.session.id)}
       <SessionCard {item} {onOpen} />
     {/each}
+  {/if}
+
+  {#if $groups.projects.length}
+    <p class="lbl">{$t('m.sec_projects')}</p>
+    <div class="plist">
+      {#each $groups.projects as p (p.group.id)}
+        <button class="prow" onclick={() => onProject(p.group.id)}>
+          <svg class="picon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span class="pname">{p.group.name}</span>
+          <span class="pcount">{$t('m.count_sessions').replace('{n}', String(p.items.length))}</span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-4)" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      {/each}
+    </div>
   {/if}
 
   {#if $groups.recent.length}
@@ -94,6 +109,38 @@
     text-transform: uppercase;
     color: var(--m-text-3);
   }
+  .plist {
+    background: var(--m-surface);
+    border-radius: 14px;
+    box-shadow: var(--m-shadow-card);
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .prow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 48px;
+    padding: 12px 16px;
+    border: none;
+    background: none;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .prow + .prow { border-top: 1px solid var(--m-divider); }
+  .picon { flex: none; color: var(--m-text-3); }
+  .pname {
+    flex: 1;
+    min-width: 0;
+    font-size: 15px;
+    color: var(--m-text);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .pcount { flex: none; font-size: 12px; color: var(--m-text-3); }
   .all {
     display: block;
     margin: 4px auto 0;

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { get } from 'svelte/store'
-import { sessions } from '../lib/stores'
-import { feedGroups, allSessions, matchesQuery } from './feedGroups'
-import type { Session } from '../lib/types'
+import { sessions, sessionGroups } from '../lib/stores'
+import { feedGroups, allSessions, matchesQuery, projectOf } from './feedGroups'
+import type { Session, SessionGroup } from '../lib/types'
 
 const mk = (id: string, minutesAgo: number, extra: Partial<Session> = {}): Session =>
   ({
@@ -33,6 +33,51 @@ describe('feedGroups', () => {
     expect(g.todo.map((i) => i.session.id)).toEqual(['a'])
     expect(g.active.map((i) => i.session.id)).toEqual(['b'])
     expect(g.recentTotal).toBe(1)
+  })
+})
+
+describe('feedGroups projects', () => {
+  beforeEach(() => {
+    sessions.set([])
+    sessionGroups.set([])
+  })
+
+  const proj = (id: string, ids: string[], extra: Partial<SessionGroup> = {}): SessionGroup =>
+    ({ id, name: `Project ${id}`, session_ids: ids, working_dir: `/w/${id}`, ...extra })
+
+  it('lists projects in registry order and keeps their done sessions out of Recent', () => {
+    sessions.set([mk('a', 1), mk('b', 2), mk('c', 3), mk('d', 4)])
+    sessionGroups.set([proj('p2', ['c']), proj('p1', ['a', 'b'])])
+    const g = get(feedGroups)
+    expect(g.projects.map((p) => p.group.id)).toEqual(['p2', 'p1'])
+    expect(g.projects[1].items.map((i) => i.session.id)).toEqual(['a', 'b'])
+    expect(g.recent.map((i) => i.session.id)).toEqual(['d'])
+    expect(g.recentTotal).toBe(1)
+  })
+
+  it('keeps a project session that needs you in To-do and Active too', () => {
+    sessions.set([
+      mk('ask', 1, { pending_question: true } as Partial<Session>),
+      mk('run', 2, { status: 'running' } as Partial<Session>),
+    ])
+    sessionGroups.set([proj('p', ['ask', 'run'])])
+    const g = get(feedGroups)
+    expect(g.todo.map((i) => i.session.id)).toEqual(['ask'])
+    expect(g.active.map((i) => i.session.id)).toEqual(['run'])
+    expect(g.projects[0].items.map((i) => i.session.id)).toEqual(['ask', 'run'])
+  })
+
+  it('treats a group without a working dir as no project', () => {
+    sessions.set([mk('a', 1)])
+    sessionGroups.set([{ id: 'plain', name: 'Plain', session_ids: ['a'] }])
+    const g = get(feedGroups)
+    expect(g.projects).toEqual([])
+    expect(get(projectOf).has('a')).toBe(false)
+  })
+
+  it('maps a session to its project name', () => {
+    sessionGroups.set([proj('p', ['a'])])
+    expect(get(projectOf).get('a')).toBe('Project p')
   })
 })
 

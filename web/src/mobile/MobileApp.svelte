@@ -13,9 +13,12 @@
   import TasksTab from './TasksTab.svelte'
   import ConfigTab from './ConfigTab.svelte'
   import NewTask from './NewTask.svelte'
+  import ProjectSessions from './ProjectSessions.svelte'
   import QuestionOverlay from './QuestionOverlay.svelte'
   import type { FeedKind } from './feedGroups'
-  import { setActiveSession } from '../lib/stores'
+  import { onMount } from 'svelte'
+  import { setActiveSession, sessionGroups, pinnedSessions, collapsedSessions } from '../lib/stores'
+  import * as api from '../lib/api'
   import { t } from '../lib/i18n'
 
   type Tab = 'chat' | 'tasks' | 'config' | 'settings'
@@ -27,6 +30,11 @@
   // New-task sheet (FAB) + the first message it queued, bound to the session
   // it was queued for — opening any other session must never inherit it.
   let newTask = $state(false)
+  // Project preselected in the new-task sheet ('' = none).
+  let newTaskGroup = $state('')
+  // Open project page (null = closed). Like history, it stays open under a
+  // session opened from it.
+  let project = $state<string | null>(null)
   // History / search page (null = closed). It stays open under a session
   // opened from it, so backing out of the session returns to the list.
   let history = $state<{ focus: boolean; query: string } | null>(null)
@@ -39,6 +47,21 @@
     openId = id
     openKind = kind
   }
+  function startNew(groupId = '') {
+    newTaskGroup = groupId
+    newTask = true
+  }
+
+  // The desktop fetches the group registry when its sidebar mounts; the phone
+  // has no sidebar, so fetch it here. App.svelte's WS handlers keep it current.
+  onMount(() => {
+    api.listSessionGroups().then(org => {
+      sessionGroups.set(org.groups)
+      pinnedSessions.set(org.pinned)
+      collapsedSessions.set(org.collapsed)
+    }).catch(() => { /* non-critical: the feed just shows no projects */ })
+  })
+
   function closeDetail() {
     openId = null
     openKind = null
@@ -51,6 +74,7 @@
     {#if tab === 'chat'}
       {#if newTask}
         <NewTask
+          groupId={newTaskGroup}
           onCancel={() => (newTask = false)}
           onCreated={(id, prompt) => { newTask = false; openSession(id, prompt ? 'running' : 'done'); if (prompt) initial = { id, prompt } }}
         />
@@ -72,8 +96,20 @@
           onOpen={(id, kind) => { history!.focus = false; openSession(id, kind) }}
           onBack={() => (history = null)}
         />
+      {:else if project}
+        <ProjectSessions
+          groupId={project}
+          onOpen={openSession}
+          onNew={startNew}
+          onBack={() => (project = null)}
+        />
       {:else}
-        <Feed onOpen={openSession} onNew={() => (newTask = true)} onHistory={(focus) => (history = { focus, query: '' })} />
+        <Feed
+          onOpen={openSession}
+          onNew={() => startNew()}
+          onHistory={(focus) => (history = { focus, query: '' })}
+          onProject={(id) => (project = id)}
+        />
       {/if}
     {:else if tab === 'tasks'}
       <TasksTab onOpenSession={(id) => { tab = 'chat'; openSession(id, 'running') }} />
@@ -85,7 +121,7 @@
   </main>
 
   <nav class="m-tabbar">
-    <button class="m-tab" class:on={tab === 'chat'} onclick={() => { tab = 'chat'; closeDetail(); history = null }}>
+    <button class="m-tab" class:on={tab === 'chat'} onclick={() => { tab = 'chat'; closeDetail(); history = null; project = null }}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>
       <span>{$t('m.tab_sessions')}</span>
     </button>

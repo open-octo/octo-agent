@@ -1,12 +1,19 @@
 <script lang="ts">
-  import type { FeedItem, FeedKind } from './feedGroups'
+  import { projectOf, type FeedItem, type FeedKind } from './feedGroups'
   import { t } from '../lib/i18n'
   import { ago, clockTick } from '../lib/relTime'
 
-  let { item, onOpen }: { item: FeedItem; onOpen: (id: string, kind: FeedKind) => void } = $props()
+  // showProject is off inside a project's own page, where every card would
+  // repeat the page title.
+  let { item, onOpen, showProject = true }: {
+    item: FeedItem
+    onOpen: (id: string, kind: FeedKind) => void
+    showProject?: boolean
+  } = $props()
 
   const s = $derived(item.session)
   const title = $derived(s.title || s.name || $t('m.untitled'))
+  const project = $derived(showProject ? $projectOf.get(s.id) : undefined)
 </script>
 
 <button
@@ -28,6 +35,13 @@
     {/if}
   </div>
   <div class="meta">
+    {#if project}
+      <span class="proj">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span class="pname">{project}</span>
+      </span>
+      <span class="dot">·</span>
+    {/if}
     {#if item.kind === 'running'}
       <span class="running">{$t('m.card_running')}<span class="blink">•••</span></span>
     {:else}
@@ -111,6 +125,9 @@
   .blink { animation: bk 1.1s steps(1) infinite; letter-spacing: 2px; margin-left: 3px; }
   @keyframes bk { 50% { opacity: .2 } }
   .mono { font-family: ui-monospace, Menlo, monospace; }
+  .proj { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 45%; color: var(--m-text-2); }
+  .proj svg { flex: none; }
+  .pname { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .dot { color: var(--m-text-4); }
   @media (prefers-reduced-motion: reduce) {
     .pulse::after, .blink { animation: none; }
