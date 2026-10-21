@@ -395,14 +395,14 @@
   // Test results keyed by "endpoint::model", the server's composite id.
   let testing = $state<string | null>(null)
   let tested = $state<Record<string, { ok: boolean; msg: string }>>({})
-  // No key is sent: the server tests with the key real requests would use —
-  // the vendor's env var, then the endpoint's stored key.
+  // By endpoint id: the server tests with the endpoint's own connection —
+  // env key, then its stored key, plus its headers — as real requests do.
   async function testModel(ep: api.EndpointConfig, model: string) {
     const cid = `${ep.id}::${model}`
     if (testing) return
     testing = cid
     try {
-      const r = await api.testConfig({ model, base_url: baseURLOf(ep), provider: ep.provider, protocol: ep.protocol as api.ModelConfigInput['protocol'] })
+      const r = await api.testEndpoint(ep.id, model)
       tested = { ...tested, [cid]: { ok: r.ok, msg: r.ok ? tr('models.test.ok') : (r.message || tr('models.test.fail')) } }
     } catch (e: any) {
       tested = { ...tested, [cid]: { ok: false, msg: e?.message ?? tr('models.test.fail') } }

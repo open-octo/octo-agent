@@ -1220,6 +1220,12 @@ export async function addEndpointModel(id: string, model: string, vision: boolea
 // Asks a saved Custom OpenAI-compatible endpoint which model ids it serves
 // (GET <base_url>/v1/models, server-side with the stored key). An upstream
 // failure comes back as ok:false with a message, not as a thrown error.
+// Tests a saved endpoint with its own stored connection (key, base URL,
+// headers); testConfig is for unsaved form values.
+export async function testEndpoint(id: string, model: string): Promise<TestConfigResult> {
+  return request<TestConfigResult>(`/api/config/endpoints/${encodeURIComponent(id)}/test`, { method: 'POST', ...json({ model }) })
+}
+
 export async function listRemoteModels(id: string): Promise<{ ok: boolean; models?: string[]; message?: string }> {
   return request<{ ok: boolean; models?: string[]; message?: string }>(`/api/config/endpoints/${encodeURIComponent(id)}/remote-models`)
 }
