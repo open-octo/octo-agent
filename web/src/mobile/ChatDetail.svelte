@@ -4,17 +4,28 @@
   // desktop uses). Tool calls render through the desktop ToolGroup (same
   // expandable cards: command, output, diff, todo list); the composer is a
   // lightweight mobile input rather than the desktop Composer.
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import { get } from 'svelte/store'
-  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, sessions, clearMsgs, artifacts } from '../lib/stores'
+  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, chatContextUsage, chatGoal, sessions, clearMsgs, artifacts, showToast } from '../lib/stores'
+  import { goalChip } from '../lib/goalChip'
+  import * as api from '../lib/api'
   import type { Attachment } from '../lib/composerDrafts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile, mobileSteers } from './chatWiring'
   import { renderMarkdown } from '../lib/markdown'
   import { t } from '../lib/i18n'
   import ArtifactsSheet from './ArtifactsSheet.svelte'
+  import EditMessageSheet from './EditMessageSheet.svelte'
+  import { longpress } from './longpress'
+  import SessionSettings from './SessionSettings.svelte'
   import AuthedImage from './AuthedImage.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
+  import GenuiBlock from '../components/genui/GenuiBlock.svelte'
+  import { splitOctoUiFences, FENCE_OPEN } from '../lib/genui/fence-split'
+  import { projectPanels, isAnchor } from '../lib/genui/projection'
+  import { silentActionPanel, precedingSaid, couldBeSilentReply, parseActionEnvelope, OCTO_UI_ACTION_PREFIX } from '../lib/genui/silent-turn'
+  import { isHiddenReplyAt, visibleCount } from './genuiView'
+  import type { GenuiActionEvent } from '../lib/genui/context'
   import AttachmentStrip from './AttachmentStrip.svelte'
   import { AttachmentTray } from './attachments.svelte'
 
@@ -34,18 +45,98 @@
 
   const sid = $derived($activeSessionId ?? '')
   let showArtifacts = $state(false)
+  let showSettings = $state(false)
   const msgs = $derived($chatMessages[sid] ?? [])
   const steers = $derived($mobileSteers[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
+
+  // ── GenUI: ```octo-ui fences in replies render as live panels ─────────────
+  // The desktop ChatView's rules, on the same shared helpers. Which version of
+  // each addressable panel (one with an id) is live, and where it renders:
+  // projectPanels scans every message's text and this runs on each streamed
+  // delta, so reuse the last result while the tail is still growing (80 ms,
+  // the desktop's render throttle) and recompute once it settles.
+  let panelCache: { sig: string; panels: ReturnType<typeof projectPanels>; at: number } | null = null
+  const panels = $derived.by(() => {
+    const last = msgs[msgs.length - 1]
+    const sig = `${msgs.length}:${last?.id ?? ''}:${last?.content?.length ?? 0}:${last?.streaming ?? false}`
+    if (panelCache && (panelCache.sig === sig || (last?.streaming && Date.now() - panelCache.at < 80))) return panelCache.panels
+    const next = projectPanels(msgs)
+    panelCache = { sig, panels: next, at: Date.now() }
+    return next
+  })
+  // An action is sent as an "[octo-ui-action] {...}" user turn. One from a
+  // panel with an id is a silent turn: neither it nor the reply that updates
+  // the panel draws a bubble. An anonymous panel's action shows as a chip.
+  function sendGenuiAction(event: GenuiActionEvent, panelId?: string) {
+    if (!sid) return
+    const body: Record<string, unknown> = { action: event.action, fields: event.fields }
+    if (panelId) body.panel = panelId
+    if (event.payload !== undefined) body.payload = event.payload
+    sendMobile(sid, `${OCTO_UI_ACTION_PREFIX}${JSON.stringify(body)}`)
+  }
+  // The panel waiting on a silent turn, gated on a turn actually running so
+  // one that errored out doesn't leave the panel disabled for good.
+  const pendingPanel = $derived.by(() => {
+    if (!streaming) return null
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (m.type === 'assistant') {
+        const p = silentActionPanel(precedingSaid(msgs, i))
+        return p && couldBeSilentReply(m.content) ? p : null
+      }
+      if (m.type === 'user') return silentActionPanel(m)
+    }
+    return null
+  })
   const session = $derived($sessions.find(s => s.id === sid) ?? null)
   const title = $derived(session?.title || session?.name || $t('m.session'))
   // A confirmation raised for THIS session while it's open — surface an inline
   // entry to the approval detail (the feed card is out of view here).
   const pendingApproval = $derived(session?.pending_confirmation ?? false)
+  // How full the context is, as the desktop composer's chip shows it.
+  const ctxUsage = $derived(Number($chatContextUsage[sid] ?? session?.context_usage ?? 0))
+
+  // Editing a sent message (long press on its bubble). The target is captured
+  // when the sheet opens: a re-render can put another bubble at the same list
+  // position, and the server checks index + original text before cutting.
+  let editTarget = $state<{ sid: string; messageIndex: number; content: string } | null>(null)
+  // The desktop's rule: a bubble needs its persisted position; mid-turn only
+  // the turn in flight qualifies (the server interrupts and reruns it) — an
+  // older one would cut finished turns, so it waits until the reply stops.
+  const lastClosedReply = $derived(msgs.findLastIndex((x: any) => x.type === 'assistant' && typeof x.messageIndex === 'number'))
+  function canEdit(i: number): boolean {
+    const m = msgs[i]
+    if (m?.type !== 'user' || typeof m.messageIndex !== 'number' || m.pending) return false
+    return !streaming || i > lastClosedReply
+  }
+  function startEdit(i: number) {
+    if (!canEdit(i)) return
+    editTarget = { sid, messageIndex: msgs[i].messageIndex, content: msgs[i].content }
+  }
+  // The server truncates and reruns by itself (no resend from here) and
+  // broadcasts history_rollback, which reloads the transcript.
+  async function saveEdit(text: string): Promise<boolean> {
+    const target = editTarget
+    if (!target) return false
+    try {
+      await api.editMessage(target.sid, target.messageIndex, text, target.content)
+      return true
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+      return false
+    }
+  }
 
   function stop() {
     if (sid) ws.interrupt(sid)
   }
+
+  // The session goal (loaded with the history, kept live by goal_updated):
+  // objective and status on one line, the whole objective on tap.
+  const goal = $derived($chatGoal[sid] ?? null)
+  const goalStatus = $derived(goalChip(goal))
+  let goalOpen = $state(false)
 
   // The session plan, as the desktop's plan card shows it: a summary with a
   // progress bar, steps on tap. Dropped 3s after every step completes (the
@@ -129,9 +220,14 @@
     }
   })
 
-  // Keep pinned to the latest message as the transcript grows.
+  // Keep pinned to the latest message as the transcript grows — by what it
+  // draws (see visibleCount), and not while a silent panel turn is in flight:
+  // the view stays on the panel being used (the desktop's pin = !panelId). A
+  // reply that turns out visible adds a row, and that pins again.
+  const shown = $derived(visibleCount(msgs))
   $effect(() => {
-    void msgs.length
+    void shown
+    if (untrack(() => pendingPanel)) return
     tick().then(() => {
       if (scroller) scroller.scrollTop = scroller.scrollHeight
     })
@@ -157,13 +253,14 @@
   <button class="back" onclick={onBack} aria-label={$t('m.back')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-text)" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
   </button>
-  <div class="dtitle">
+  <button class="dtitle" onclick={() => (showSettings = true)} aria-haspopup="dialog">
     <span class="t">{title}</span>
     <span class="sub">
       <span class="d" class:live={streaming}></span>
-      {streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}
+      <span class="sub-text">{streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}{` · ${ctxUsage}%`}</span>
+      <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
     </span>
-  </div>
+  </button>
   {#if $artifacts.length}
     <button class="arts" onclick={() => (showArtifacts = true)} aria-label={$t('m.artifacts')}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
@@ -171,6 +268,14 @@
     </button>
   {/if}
 </header>
+
+{#if editTarget}
+  <EditMessageSheet content={editTarget.content} onSave={saveEdit} onClose={() => (editTarget = null)} />
+{/if}
+
+{#if showSettings && sid}
+  <SessionSettings sessionId={sid} onClose={() => (showSettings = false)} />
+{/if}
 
 {#if showArtifacts}
   <ArtifactsSheet onClose={() => (showArtifacts = false)} />
@@ -181,6 +286,14 @@
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-warning)" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
     <span class="txt">{$t('m.approval_banner')}</span>
     <span class="go">{$t('m.view')} ›</span>
+  </button>
+{/if}
+
+{#if goal}
+  <button class="goal" class:open={goalOpen} onclick={() => (goalOpen = !goalOpen)} aria-expanded={goalOpen}>
+    <span class="goal-label">{$t('chat.goal')}</span>
+    <span class="goal-text">{goal.objective}</span>
+    <span class="goal-status" class:active={goal.status === 'active'}>{goalStatus}</span>
   </button>
 {/if}
 
@@ -203,8 +316,10 @@
 {/if}
 
 <div class="scroll" bind:this={scroller}>
-  {#each msgs as msg (msg.id)}
-    {#if msg.type === 'user'}
+  {#each msgs as msg, i (msg.id)}
+    {#if msg.type === 'user' && silentActionPanel(msg)}
+      <!-- The user half of a silent turn: feedback lives on the panel. -->
+    {:else if msg.type === 'user'}
       {#if msg.images?.length}
         <div class="atts sent" class:pending={msg.pending}>
           {#each msg.images as ref, i (i)}
@@ -217,12 +332,41 @@
         </div>
       {/if}
       {#if msg.content}
-        <div class="bubble user" class:pending={msg.pending}>{msg.content}</div>
+        {@const action = parseActionEnvelope(msg.content)}
+        {#if action}
+          <!-- An anonymous panel's action: a chip, not the raw envelope. -->
+          <div class="bubble user action" class:pending={msg.pending}>{$t('chat.genui_action_triggered')}: {action.action}</div>
+        {:else}
+          <div class="bubble user" class:pending={msg.pending} class:editable={canEdit(i)} use:longpress={canEdit(i) ? () => startEdit(i) : null}>{msg.content}</div>
+        {/if}
       {/if}
+    {:else if msg.type === 'assistant' && isHiddenReplyAt(msgs, i)}
+      <!-- The reply half of a silent turn, drawn into its panel above. -->
     {:else if msg.type === 'assistant'}
-      <div class="bubble agent">
+      <div class="bubble agent" class:wide={msg.content?.includes(FENCE_OPEN)}>
         {#if msg.thinking}<div class="thoughts">{@html renderMarkdown(msg.thinking)}</div>{/if}
-        <div class="body">{@html renderMarkdown(msg.content)}{#if msg.streaming}<span class="caret">▋</span>{/if}</div>
+        <div class="body">
+          {#each splitOctoUiFences(msg.content) as seg, segIdx (segIdx)}
+            {#if seg.kind === 'markdown'}
+              {@html renderMarkdown(seg.text)}
+            {:else if seg.spec && isAnchor(panels, seg.spec, msg.id, segIdx)}
+              <!-- An addressable panel renders its newest version, which a
+                   silent turn may have replaced since this message. A spec the
+                   guard rejected (null) renders nothing, never raw text. -->
+              {@const live = seg.spec.id ? (panels.get(seg.spec.id)?.spec ?? seg.spec) : seg.spec}
+              <div class="genui">
+                <GenuiBlock
+                  spec={live}
+                  interactive={seg.complete}
+                  pending={!!seg.spec.id && pendingPanel === seg.spec.id}
+                  sessionId={sid}
+                  onaction={(a) => sendGenuiAction(a, seg.spec?.id)}
+                />
+              </div>
+            {/if}
+          {/each}
+          {#if msg.streaming}<span class="caret">▋</span>{/if}
+        </div>
       </div>
     {:else if msg.type === 'thinking'}
       <div class="thoughts standalone">{@html renderMarkdown(msg.thinking)}</div>
@@ -236,7 +380,10 @@
     <div class="steer">
       <span class="spin"></span>
       <span class="steer-body">
-        {#if s.content}<span class="steer-text">{s.content}</span>{/if}
+        {#if s.content}
+          {@const action = parseActionEnvelope(s.content)}
+          <span class="steer-text">{action ? `${$t('chat.genui_action_triggered')}: ${action.action}` : s.content}</span>
+        {/if}
         {#if s.images.length}
           <span class="atts">
             {#each s.images as ref, i (i)}
@@ -302,7 +449,7 @@
     cursor: pointer;
     box-shadow: var(--m-shadow-card);
   }
-  .dtitle { flex: 1; min-width: 0; }
+  .dtitle { flex: 1; min-width: 0; padding: 0; border: none; background: none; font: inherit; text-align: left; cursor: pointer; }
   .dtitle .t {
     display: block;
     font-size: 15px;
@@ -337,7 +484,9 @@
     font-size: 11px;
     color: var(--m-text-3);
   }
-  .sub .d { width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
+  .sub .sub-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub .chev { flex: none; }
+  .sub .d { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
   .sub .d.live { background: var(--m-success); }
   .scroll {
     flex: 1;
@@ -364,6 +513,12 @@
     border-radius: 14px 4px 14px 14px;
   }
   .bubble.user.pending { opacity: .6; }
+  .bubble.user.action { font-size: 13px; opacity: .85; }
+  /* A panel needs the bubble's full width. */
+  .bubble.agent.wide { max-width: 100%; align-self: stretch; }
+  .genui { margin: 6px 0; }
+  /* Long press edits: keep iOS from selecting text or raising its callout. */
+  .bubble.user.editable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .bubble.agent {
     align-self: flex-start;
     background: var(--m-surface);
@@ -396,7 +551,29 @@
     font-size: 12px;
     color: var(--m-text-3);
     text-align: center;
+    white-space: pre-line;
   }
+  .goal {
+    flex: none;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 12px 8px;
+    padding: 9px 14px;
+    background: var(--m-surface);
+    border: 1px solid var(--m-border-2);
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--m-text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .goal-label { flex: none; font-weight: 600; }
+  .goal-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--m-text-2); }
+  .goal.open .goal-text { white-space: pre-wrap; word-break: break-word; }
+  .goal-status { flex: none; font-size: 12px; color: var(--m-text-3); font-variant-numeric: tabular-nums; }
+  .goal-status.active { color: var(--m-accent); }
   .notice.err { color: var(--m-error); }
   .steer {
     align-self: flex-end;
@@ -608,6 +785,10 @@
     box-shadow: var(--m-shadow-card);
   }
   /* ── Markdown rendering (adapted from desktop for mobile) ─────────────────── */
+  /* A reply is rendered HTML: .bubble's pre-wrap (for typed user text) would
+     turn the newlines between tags — and the template's own indentation —
+     into blank lines. (.thoughts sets its own pre-wrap.) */
+  .bubble.agent { white-space: normal; }
   .bubble.agent .body :global(p) { margin: 0; }
   .bubble.agent .body :global(p:not(:last-child)) { margin: 0 0 8px; }
   .bubble.agent .body :global(h1), .bubble.agent .body :global(h2), .bubble.agent .body :global(h3), .bubble.agent .body :global(h4) {
