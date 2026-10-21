@@ -26,6 +26,7 @@ import {
   chatStreaming,
   chatThinking,
   chatProgress,
+  chatTodos,
   chatLastTextAt,
   chatGoal,
   addChatMsg,
@@ -231,6 +232,13 @@ export function wireMobileSession(sid: string): () => void {
     if (!forSid(ev)) return
     chatProgress.update(p => ({ ...p, [sid]: { message: ev.message || 'Thinking', phase: ev.phase } }))
     if (ev.phase === 'active') chatStreaming.update(s => ({ ...s, [sid]: true }))
+  }))
+
+  // The session plan (task_create / task_update). Replayed on subscribe, so a
+  // freshly opened chat picks up a plan already in progress.
+  cleanups.push(ws.on('todo_update', (ev: any) => {
+    if (!forSid(ev)) return
+    chatTodos.update(t => ({ ...t, [sid]: ev.todos ?? [] }))
   }))
 
   cleanups.push(ws.on('complete', (ev: any) => {

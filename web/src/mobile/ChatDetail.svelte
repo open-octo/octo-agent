@@ -5,7 +5,8 @@
   // expandable cards: command, output, diff, todo list); the composer is a
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
-  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs, artifacts } from '../lib/stores'
+  import { get } from 'svelte/store'
+  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, sessions, clearMsgs, artifacts } from '../lib/stores'
   import type { Attachment } from '../lib/composerDrafts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
@@ -44,6 +45,46 @@
   function stop() {
     if (sid) ws.interrupt(sid)
   }
+
+  // The session plan, as the desktop's plan card shows it: a summary with a
+  // progress bar, steps on tap. Dropped 3s after every step completes (the
+  // server doesn't replay a finished plan, so it won't come back on reopen).
+  const todos = $derived($chatTodos[sid] ?? [])
+  const planDone = $derived(todos.filter((s: any) => s.status === 'completed').length)
+  let planOpen = $state(false)
+  const PLAN_DISMISS_MS = 3000
+  $effect(() => {
+    const s = sid
+    if (!s || todos.length === 0 || todos.some((x: any) => x.status !== 'completed')) return
+    const timer = setTimeout(() => chatTodos.update(t => ({ ...t, [s]: [] })), PLAN_DISMISS_MS)
+    return () => clearTimeout(timer)
+  })
+
+  // Status line while a turn runs: the server's progress message (or a plain
+  // "Thinking") plus the time since the turn began. The start is kept in the
+  // shared per-session store, as on desktop, so reopening the chat mid-turn
+  // doesn't restart the clock.
+  const progress = $derived($chatProgress[sid] ?? null)
+  const statusLabel = $derived(progress?.message && progress.message !== 'Thinking' ? progress.message : $t('chat.thinking_0'))
+  let now = $state(Date.now())
+  $effect(() => {
+    const s = sid
+    if (!s) return
+    if (streaming) {
+      if (!get(chatTurnStart)[s]) chatTurnStart.update(m => ({ ...m, [s]: Date.now() }))
+      now = Date.now()
+      const tick = setInterval(() => (now = Date.now()), 1000)
+      return () => clearInterval(tick)
+    } else if (get(chatTurnStart)[s]) {
+      chatTurnStart.update(m => { const n = { ...m }; delete n[s]; return n })
+    }
+  })
+  const elapsed = $derived.by(() => {
+    const start = $chatTurnStart[sid]
+    if (!start) return ''
+    const sec = Math.max(0, Math.floor((now - start) / 1000))
+    return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m${sec % 60}s`
+  })
 
   let draft = $state('')
   let scroller: HTMLElement | undefined
@@ -136,6 +177,24 @@
   </button>
 {/if}
 
+{#if todos.length}
+  <button class="plan" onclick={() => (planOpen = !planOpen)} aria-expanded={planOpen}>
+    <span class="plan-head">
+      <span class="plan-title">{$t('agent.plan')}</span>
+      <span class="plan-meta">{planDone} / {todos.length}</span>
+      <span class="plan-bar"><span style="width:{Math.round((planDone / todos.length) * 100)}%"></span></span>
+      <svg class="chev" class:open={planOpen} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+    </span>
+    {#if planOpen}
+      <span class="plan-steps">
+        {#each todos as step, i (i)}
+          <span class="step {step.status}">{step.content}</span>
+        {/each}
+      </span>
+    {/if}
+  </button>
+{/if}
+
 <div class="scroll" bind:this={scroller}>
   {#each msgs as msg (msg.id)}
     {#if msg.type === 'user'}
@@ -170,6 +229,7 @@
 
 {#if streaming}
   <div class="stopbar">
+    <span class="status"><span class="label">{statusLabel}</span>{#if elapsed}<span class="time">{elapsed}</span>{/if}</span>
     <button class="stop" onclick={stop}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       {$t('m.stop_gen')}
@@ -425,9 +485,67 @@
   .stopbar {
     flex: none;
     display: flex;
-    justify-content: center;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
     padding: 0 12px 8px;
   }
+  .stopbar .status {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12.5px;
+    color: var(--m-text-3);
+  }
+  .stopbar .status .label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .stopbar .status .time { flex: none; font-variant-numeric: tabular-nums; }
+  .stopbar .stop { flex: none; }
+  .plan {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 12px 8px;
+    padding: 10px 14px;
+    background: var(--m-surface);
+    border: 1px solid var(--m-border-2);
+    border-radius: 12px;
+    font-family: inherit;
+    color: var(--m-text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .plan-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .plan-title { font-weight: 600; }
+  .plan-meta { color: var(--m-text-3); font-variant-numeric: tabular-nums; }
+  .plan-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--m-border-2); overflow: hidden; }
+  .plan-bar span { display: block; height: 100%; background: var(--m-accent); }
+  .chev { flex: none; color: var(--m-text-3); transition: transform .15s; }
+  .chev.open { transform: rotate(180deg); }
+  .plan-steps { display: flex; flex-direction: column; gap: 6px; }
+  .step { position: relative; padding-left: 20px; font-size: 13px; line-height: 1.4; }
+  .step::before {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 4px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1.5px solid var(--m-text-4);
+    box-sizing: border-box;
+  }
+  .step.completed { color: var(--m-text-3); text-decoration: line-through; }
+  .step.completed::before { background: var(--m-success); border-color: var(--m-success); }
+  .step.in_progress { font-weight: 500; }
+  .step.in_progress::before { border-color: var(--m-accent); border-right-color: transparent; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  @media (prefers-reduced-motion: reduce) { .step.in_progress::before { animation: none } }
   .stop {
     display: flex;
     align-items: center;
