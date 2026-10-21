@@ -8,10 +8,10 @@
 
 <script lang="ts">
   // Tasks tab: scheduled (cron) tasks as mobile cards — stat chips up top, then
-  // one card per task with an enable switch, run-now and delete. Create is
-  // agentic as on desktop: a fresh chat runs the cron-task-creator skill, which
-  // collects the schedule and prompt in conversation. Edit waits for the phone
-  // to render GenUI: the skill answers an edit with an inline octo-ui form.
+  // one card per task with an enable switch, run-now, edit and delete. Create
+  // and edit are agentic as on desktop: a fresh chat runs the cron-task-creator
+  // skill, which collects the schedule and prompt in conversation (an edit
+  // answers with an inline octo-ui form the chat renders).
   import { onMount } from 'svelte'
   import { sessions, showToast, prependSession } from '../lib/stores'
   import * as api from '../lib/api'
@@ -95,6 +95,8 @@
     }
   }
   const createTask = () => openAgentic('/cron-task-creator', tr('tasks.session_new'))
+  const editTask = (t: api.TaskResponse) =>
+    openAgentic(`/cron-task-creator edit ${t.id} "${t.name}"`, tr('tasks.session_edit').replace('{name}', t.name))
 
   // Delete asks first, inside the card (window.confirm isn't surfaced by every
   // WebView).
@@ -197,6 +199,7 @@
         {:else}
           <div class="acts">
             <button class="ghost danger" disabled={deletingId === t2.id} onclick={() => (confirmingId = t2.id)}>{$t('common.delete')}</button>
+            <button class="ghost" disabled={opening} onclick={() => editTask(t2)}>{$t('common.edit')}</button>
             <button class="run" disabled={runningId !== null} onclick={() => runNow(t2)}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
               {runningId === t2.id ? $t('m.starting') : $t('m.run_now')}
