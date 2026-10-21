@@ -5,9 +5,7 @@
   // hint (the detailed tool/progress view is batch 2), and the composer is a
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
-  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs, artifacts, showToast } from '../lib/stores'
-  import * as api from '../lib/api'
-  import { compressImage } from '../lib/imageCompress'
+  import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs, artifacts } from '../lib/stores'
   import type { Attachment } from '../lib/composerDrafts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
@@ -15,6 +13,8 @@
   import { t } from '../lib/i18n'
   import ArtifactsSheet from './ArtifactsSheet.svelte'
   import AuthedImage from './AuthedImage.svelte'
+  import AttachmentStrip from './AttachmentStrip.svelte'
+  import { AttachmentTray } from './attachments.svelte'
 
   let { onBack, onViewApproval, initial = null, onInitialSent }: {
     onBack: () => void
@@ -26,7 +26,7 @@
     // button sets it without going through openSession), and the prompt must
     // only ever be sent to its own session (#2093). onInitialSent lets the
     // owner clear it so a remount doesn't re-send.
-    initial?: { id: string; prompt: string } | null
+    initial?: { id: string; prompt: string; files?: Attachment[] } | null
     onInitialSent?: () => void
   } = $props()
 
@@ -48,60 +48,13 @@
   let scroller: HTMLElement | undefined
   let composing = $state(false)
 
-  // Same caps as the desktop Composer (keep in sync with its MAX_*_BYTES and
-  // maxUploadBytes in internal/server/upload_handler.go).
-  const MAX_IMAGE_BYTES = 32 * 1024 * 1024
-  const MAX_FILE_BYTES = 512 * 1024 * 1024
-  let attachments = $state<Attachment[]>([])
+  const tray = new AttachmentTray()
   let fileInput: HTMLInputElement | undefined = $state()
-  let uploadSeq = 0
-  const uploading = $derived(attachments.some(a => a.uploading))
-
-  // Images ride inline as a compressed data URL; any other file uploads to
-  // ~/.octo/uploads and is sent by path — the desktop Composer's two paths.
-  // A result that lands after the user switched sessions is dropped: staged
-  // files belong to the session they were picked in.
-  async function addAttachment(file: File) {
-    const name = file.name || 'attachment'
-    const isImage = file.type.startsWith('image/')
-    if (file.size > (isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES)) {
-      showToast($t(isImage ? 'chat.attach_img_too_large' : 'chat.attach_too_large'), 'error')
-      return
-    }
-    const originSid = sid
-    const id = `up-${++uploadSeq}`
-    attachments = [...attachments, { id, name, mime_type: file.type, uploading: true }]
-    const patch = (p: Partial<Attachment>) => {
-      if (sid === originSid) attachments = attachments.map(a => (a.id === id ? { ...a, ...p } : a))
-    }
-    try {
-      if (isImage) {
-        const dataUrl = await compressImage(file)
-        patch({ data_url: dataUrl, mime_type: dataUrl.startsWith('data:image/jpeg') ? 'image/jpeg' : file.type, uploading: false })
-      } else {
-        patch({ path: await api.uploadFile(file), uploading: false })
-      }
-    } catch (e: any) {
-      if (sid === originSid) attachments = attachments.filter(a => a.id !== id)
-      showToast(e?.message ?? name, 'error')
-    }
-  }
-
-  function onPick(e: Event) {
-    const input = e.currentTarget as HTMLInputElement
-    for (const f of Array.from(input.files ?? [])) addAttachment(f)
-    // Reset so picking the same file again still fires change.
-    input.value = ''
-  }
-
-  function removeAttachment(id: string | undefined) {
-    attachments = attachments.filter(a => a.id !== id)
-  }
 
   // Staged files never follow the user into another session.
   $effect(() => {
     void sid
-    attachments = []
+    tray.clear()
   })
 
   // Subscribe + wire while this session is open; tear down on switch/unmount.
@@ -114,8 +67,8 @@
     loadMobileHistory(s).then(() => {
       if (cancelled) return
       ws.subscribe(s)
-      if (initial?.prompt && initial.id === s) {
-        sendMobile(s, initial.prompt, [])
+      if ((initial?.prompt || initial?.files?.length) && initial.id === s) {
+        sendMobile(s, initial.prompt, initial.files ?? [])
         onInitialSent?.()
       }
     })
@@ -137,21 +90,10 @@
 
   function send() {
     const text = draft.trim()
-    if ((!text && !attachments.length) || !sid) return
-    if (uploading) {
-      showToast($t('chat.upload_in_progress'), 'error')
-      return
-    }
-    // Everything rides one WS message bounded by the server's 4 MB cap.
-    let payload = text.length
-    for (const a of attachments) payload += a.data_url?.length ?? 0
-    if (payload > 3_500_000) {
-      showToast($t('chat.attach_batch_too_big'), 'error')
-      return
-    }
-    sendMobile(sid, text, attachments.length ? [...attachments] : [])
+    if ((!text && !tray.items.length) || !sid || !tray.ready(text)) return
+    sendMobile(sid, text, [...tray.items])
     draft = ''
-    attachments = []
+    tray.clear()
   }
 
   function onKey(e: KeyboardEvent) {
@@ -244,28 +186,12 @@
   </div>
 {/if}
 
-{#if attachments.length}
-  <div class="atts staged">
-    {#each attachments as a (a.id)}
-      {#if a.data_url}
-        <span class="thumb">
-          <AuthedImage src={a.data_url} alt={a.name} />
-          <button class="rm" onclick={() => removeAttachment(a.id)} aria-label={$t('chat.remove')}>×</button>
-        </span>
-      {:else}
-        <span class="chip" class:busy={a.uploading}>
-          {a.name}
-          {#if !a.uploading}
-            <button class="rm inline" onclick={() => removeAttachment(a.id)} aria-label={$t('chat.remove')}>×</button>
-          {/if}
-        </span>
-      {/if}
-    {/each}
-  </div>
+{#if tray.items.length}
+  <div class="staged"><AttachmentStrip {tray} /></div>
 {/if}
 
 <div class="composer">
-  <input type="file" multiple hidden bind:this={fileInput} onchange={onPick} />
+  <input type="file" multiple hidden bind:this={fileInput} onchange={(e) => tray.addFromInput(e)} />
   <button class="attach" onclick={() => fileInput?.click()} aria-label={$t('chat.attach_file')}>
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
   </button>
@@ -277,7 +203,7 @@
     placeholder={$t('m.reply_ph')}
     rows="1"
   ></textarea>
-  <button class="send" onclick={send} disabled={(!draft.trim() && !attachments.length) || uploading} aria-label={$t('m.send')}>
+  <button class="send" onclick={send} disabled={(!draft.trim() && !tray.items.length) || tray.uploading} aria-label={$t('m.send')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>
   </button>
 </div>
@@ -462,13 +388,13 @@
     max-width: 82%;
   }
   .atts.sent.pending { opacity: .6; }
-  .atts.staged {
+  .staged {
     flex: none;
     padding: 8px 12px 0;
     background: var(--m-surface);
     border-top: 1px solid var(--m-border-2);
   }
-  .atts.staged + .composer { border-top: none; }
+  .staged + .composer { border-top: none; }
   .thumb {
     position: relative;
     width: 64px;
@@ -491,30 +417,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .chip.busy { opacity: .6; }
-  .rm {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(0, 0, 0, .55);
-    color: #fff;
-    font-size: 14px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-  }
-  .rm.inline {
-    position: static;
-    flex: none;
-    background: none;
-    color: var(--m-text-3);
   }
   .approve-banner {
     flex: none;

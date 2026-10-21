@@ -4,21 +4,27 @@
   // permission mode, and land in the streaming chat detail. A task takes no
   // working directory of its own: that belongs to a project, which is where
   // memory is scoped too. Leaving the prompt empty just creates a blank session
-  // (the old FAB behavior).
+  // (the old FAB behavior). Attachments ride along with the first message.
   import { get } from 'svelte/store'
   import { sessions, sessionGroups, activeSessionId, globalPermissionMode, showToast } from '../lib/stores'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
+  import type { Attachment } from '../lib/composerDrafts'
+  import AttachmentStrip from './AttachmentStrip.svelte'
+  import { AttachmentTray } from './attachments.svelte'
 
   // groupId preselects a project: set when opened from that project's page.
   let { onCancel, onCreated, groupId = '' }: {
     onCancel: () => void
-    onCreated: (id: string, prompt: string) => void
+    onCreated: (id: string, prompt: string, files: Attachment[]) => void
     groupId?: string
   } = $props()
 
   let prompt = $state('')
   let creating = $state(false)
+  const tray = new AttachmentTray()
+  let fileInput: HTMLInputElement | undefined = $state()
+  const hasMessage = $derived(!!prompt.trim() || tray.items.length > 0)
 
   // '' = no project, a loose session.
   // svelte-ignore state_referenced_locally
@@ -61,7 +67,7 @@
   ]
 
   async function create() {
-    if (creating) return
+    if (creating || !tray.ready(prompt.trim())) return
     creating = true
     try {
       const sess = await api.createSession({ source: 'manual', ...(projectId ? { group_id: projectId } : {}) })
@@ -84,7 +90,7 @@
         await api.updateSessionPermissionMode(sess.id, permMode).catch((e: any) =>
           showToast(e?.message ?? tr('m.perm_fail'), 'error'))
       }
-      onCreated(sess.id, prompt.trim())
+      onCreated(sess.id, prompt.trim(), [...tray.items])
     } catch (e: any) {
       showToast(e?.message ?? tr('m.create_fail'), 'error')
       creating = false
@@ -109,6 +115,13 @@
       aria-label={$t('m.task_desc')}
       bind:value={prompt}
     ></textarea>
+    <div class="attach-row">
+      <input type="file" multiple hidden bind:this={fileInput} onchange={(e) => tray.addFromInput(e)} />
+      <button class="attach" onclick={() => fileInput?.click()} aria-label={$t('chat.attach_file')}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
+      </button>
+      {#if tray.items.length}<AttachmentStrip {tray} />{/if}
+    </div>
   </div>
 
   {#if projects.length}
@@ -147,8 +160,8 @@
     </p>
   </div>
 
-  <button class="go" disabled={creating} onclick={create}>
-    {creating ? $t('m.creating') : prompt.trim() ? $t('m.create_start') : $t('m.create_blank')}
+  <button class="go" disabled={creating || tray.uploading} onclick={create}>
+    {creating ? $t('m.creating') : hasMessage ? $t('m.create_start') : $t('m.create_blank')}
   </button>
 </div>
 
@@ -172,6 +185,12 @@
     outline: none;
   }
   .prompt::placeholder { color: var(--m-text-4); }
+  .attach-row { display: flex; align-items: flex-start; gap: 8px; padding: 0 12px 12px; }
+  .attach {
+    flex: none; width: 34px; height: 34px; border-radius: 50%; border: none;
+    background: var(--m-surface-2); color: var(--m-text-2); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
 
   .select, 
 

@@ -16,6 +16,7 @@
   import SessionActions from './SessionActions.svelte'
   import QuestionOverlay from './QuestionOverlay.svelte'
   import type { FeedKind } from './feedGroups'
+  import type { Attachment } from '../lib/composerDrafts'
   import { onMount } from 'svelte'
   import { setActiveSession, sessionGroups, pinnedSessions, collapsedSessions } from '../lib/stores'
   import * as api from '../lib/api'
@@ -38,7 +39,7 @@
   // History / search page (null = closed). It stays open under a session
   // opened from it, so backing out of the session returns to the list.
   let history = $state<{ focus: boolean; query: string } | null>(null)
-  let initial = $state<{ id: string; prompt: string } | null>(null)
+  let initial = $state<{ id: string; prompt: string; files: Attachment[] } | null>(null)
 
   function openSession(id: string, kind: FeedKind) {
     newTask = false
@@ -76,7 +77,7 @@
         <NewTask
           groupId={newTaskGroup}
           onCancel={() => (newTask = false)}
-          onCreated={(id, prompt) => { newTask = false; openSession(id, prompt ? 'running' : 'done'); if (prompt) initial = { id, prompt } }}
+          onCreated={(id, prompt, files) => { const send = !!prompt || files.length > 0; newTask = false; openSession(id, send ? 'running' : 'done'); if (send) initial = { id, prompt, files } }}
         />
       {:else if openId}
         {#if openKind === 'approval'}
