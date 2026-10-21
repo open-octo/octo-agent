@@ -16,12 +16,25 @@
   let busy = $state(false)
   let field: HTMLTextAreaElement | undefined = $state()
 
-  // Focus while the opening tap is still the active gesture so iOS raises the
-  // keyboard.
+  // Focus the field at once. A long press opens this from a timer, which is
+  // not a user gesture, so iOS may still want a tap before raising the keyboard.
   onMount(() => {
     flushSync()
     field?.focus()
   })
+
+  // The long press that opened the sheet ends with a click at the finger's
+  // position, which now lands on the backdrop or a button — on the newest
+  // message, right above the composer, that is Save. Only a tap that also
+  // started on the sheet or backdrop counts (SessionActions' guard).
+  let pressed = false
+  function tapped(fn: () => void) {
+    return (e: MouseEvent) => {
+      // detail 0 is a keyboard activation, which no stray release can fake.
+      if (e.detail !== 0 && !pressed) return
+      fn()
+    }
+  }
 
   async function save() {
     if (busy || !draft.trim()) return
@@ -38,14 +51,14 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="backdrop" role="presentation" onclick={onClose}></div>
-<div class="sheet" role="dialog" aria-modal="true" aria-label={$t('chat.edit')}>
+<div class="backdrop" role="presentation" onpointerdown={() => (pressed = true)} onclick={tapped(onClose)}></div>
+<div class="sheet" role="dialog" aria-modal="true" aria-label={$t('chat.edit')} onpointerdown={() => (pressed = true)}>
   <p class="title">{$t('chat.edit')}</p>
   <textarea bind:this={field} bind:value={draft} rows="4" aria-label={$t('chat.edit')}></textarea>
   <p class="note">{$t('m.edit_note')}</p>
   <div class="row">
-    <button class="btn" onclick={onClose} disabled={busy}>{$t('m.cancel')}</button>
-    <button class="btn primary" onclick={save} disabled={busy || !draft.trim()}>{$t('common.save')}</button>
+    <button class="btn" onclick={tapped(onClose)} disabled={busy}>{$t('m.cancel')}</button>
+    <button class="btn primary" onclick={tapped(save)} disabled={busy || !draft.trim()}>{$t('common.save')}</button>
   </div>
 </div>
 

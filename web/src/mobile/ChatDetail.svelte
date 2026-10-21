@@ -50,7 +50,7 @@
   // Editing a sent message (long press on its bubble). The target is captured
   // when the sheet opens: a re-render can put another bubble at the same list
   // position, and the server checks index + original text before cutting.
-  let editTarget = $state<{ messageIndex: number; content: string } | null>(null)
+  let editTarget = $state<{ sid: string; messageIndex: number; content: string } | null>(null)
   // The desktop's rule: a bubble needs its persisted position; mid-turn only
   // the turn in flight qualifies (the server interrupts and reruns it) — an
   // older one would cut finished turns, so it waits until the reply stops.
@@ -62,15 +62,15 @@
   }
   function startEdit(i: number) {
     if (!canEdit(i)) return
-    editTarget = { messageIndex: msgs[i].messageIndex, content: msgs[i].content }
+    editTarget = { sid, messageIndex: msgs[i].messageIndex, content: msgs[i].content }
   }
   // The server truncates and reruns by itself (no resend from here) and
   // broadcasts history_rollback, which reloads the transcript.
   async function saveEdit(text: string): Promise<boolean> {
     const target = editTarget
-    if (!target || !sid) return false
+    if (!target) return false
     try {
-      await api.editMessage(sid, target.messageIndex, text, target.content)
+      await api.editMessage(target.sid, target.messageIndex, text, target.content)
       return true
     } catch (e: any) {
       showToast(e?.message ?? String(e), 'error')
@@ -256,7 +256,7 @@
         </div>
       {/if}
       {#if msg.content}
-        <div class="bubble user" class:pending={msg.pending} class:editable={canEdit(i)} use:longpress={() => startEdit(i)}>{msg.content}</div>
+        <div class="bubble user" class:pending={msg.pending} class:editable={canEdit(i)} use:longpress={canEdit(i) ? () => startEdit(i) : null}>{msg.content}</div>
       {/if}
     {:else if msg.type === 'assistant'}
       <div class="bubble agent">

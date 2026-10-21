@@ -56,9 +56,12 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
     })
   } else if (ev.type === 'assistant_message') {
     if (!(ev.content ?? '').trim() && !(ev.thinking ?? '').trim()) return
+    // message_index rides only on a reply that closed a turn; editing reads
+    // it to tell which user messages a running turn still allows.
     addChatMsg(sid, {
       id: uid('a'), type: 'assistant', content: ev.content ?? '', thinking: ev.thinking ?? '',
       createdAt: ev.created_at ?? Date.now(), streaming: false, tools: [], todos: [],
+      messageIndex: ev.message_index,
     })
   } else if (ev.type === 'thinking') {
     if (showReasoning) commitThinking(sid, ev.text ?? '')
@@ -291,8 +294,16 @@ export function wireMobileSession(sid: string): () => void {
     mobileSteers.update(m => ({ ...m, [sid]: [] }))
     chatStreaming.update(s => ({ ...s, [sid]: false }))
     chatProgress.update(p => ({ ...p, [sid]: null }))
+    // The reply's persisted index when the turn ended on one (as on desktop):
+    // stamp it on the bubble this turn produced, unless that bubble already
+    // has one — a turn that ended with no reply must not relabel the last.
+    const replyIndex = ev.message_index
     chatMessages.update(m => {
       const msgs = (m[sid] || []).map((x: any) => (x.streaming ? { ...x, streaming: false } : x))
+      if (typeof replyIndex === 'number') {
+        const k = msgs.findLastIndex((x: any) => x.type === 'assistant')
+        if (k >= 0 && typeof msgs[k].messageIndex !== 'number') msgs[k] = { ...msgs[k], messageIndex: replyIndex }
+      }
       return { ...m, [sid]: msgs }
     })
     finishAllTools(sid)
@@ -305,6 +316,7 @@ export function wireMobileSession(sid: string): () => void {
       level: 'error', createdAt: Date.now(), streaming: false, tools: [], todos: [],
     })
     chatStreaming.update(s => ({ ...s, [sid]: false }))
+    chatProgress.update(p => ({ ...p, [sid]: null }))
   }))
 
   cleanups.push(ws.on('toast', (ev: any) => {

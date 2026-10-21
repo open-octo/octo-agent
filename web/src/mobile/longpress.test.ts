@@ -50,6 +50,16 @@ describe('longpress', () => {
     expect(ev.defaultPrevented).toBe(true)
   })
 
+  it('leaves the element alone with a null handler', () => {
+    action.update(null)
+    press(el, 'pointerdown')
+    vi.advanceTimersByTime(600)
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    el.dispatchEvent(ev)
+    expect(fn).not.toHaveBeenCalled()
+    expect(ev.defaultPrevented).toBe(false)
+  })
+
   it('stops listening once destroyed', () => {
     action.destroy()
     press(el, 'pointerdown')

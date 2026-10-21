@@ -94,6 +94,15 @@ describe('sending while a turn runs', () => {
     expect(get(mobileSteers)[sid]).toEqual([])
   })
 
+  it('stamps the reply index from complete on the reply the turn produced', () => {
+    handlers.complete({ session_id: sid, message_index: 7 })
+    const msgs = get(chatMessages)[sid] as any[]
+    expect(msgs[1]).toMatchObject({ type: 'assistant', messageIndex: 7, streaming: false })
+    // A later complete without a new reply leaves the stamped one alone.
+    handlers.complete({ session_id: sid, message_index: 9 })
+    expect((get(chatMessages)[sid] as any[])[1].messageIndex).toBe(7)
+  })
+
   it('still echoes a send made while idle as a pending bubble', () => {
     chatStreaming.set({ [sid]: false })
     sendMobile(sid, 'next')
