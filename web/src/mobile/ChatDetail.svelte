@@ -4,7 +4,7 @@
   // desktop uses). Tool calls render through the desktop ToolGroup (same
   // expandable cards: command, output, diff, todo list); the composer is a
   // lightweight mobile input rather than the desktop Composer.
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import { get } from 'svelte/store'
   import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, sessions, clearMsgs, artifacts } from '../lib/stores'
   import type { Attachment } from '../lib/composerDrafts'
@@ -16,9 +16,10 @@
   import AuthedImage from './AuthedImage.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import GenuiBlock from '../components/genui/GenuiBlock.svelte'
-  import { splitOctoUiFences } from '../lib/genui/fence-split'
+  import { splitOctoUiFences, FENCE_OPEN } from '../lib/genui/fence-split'
   import { projectPanels, isAnchor } from '../lib/genui/projection'
-  import { silentActionPanel, isSilentPairAt, precedingSaid, couldBeSilentReply, parseActionEnvelope, OCTO_UI_ACTION_PREFIX } from '../lib/genui/silent-turn'
+  import { silentActionPanel, precedingSaid, couldBeSilentReply, parseActionEnvelope, OCTO_UI_ACTION_PREFIX } from '../lib/genui/silent-turn'
+  import { isHiddenReplyAt, visibleCount } from './genuiView'
   import type { GenuiActionEvent } from '../lib/genui/context'
   import AttachmentStrip from './AttachmentStrip.svelte'
   import { AttachmentTray } from './attachments.svelte'
@@ -82,17 +83,6 @@
     }
     return null
   })
-  // The reply half of a silent pair: hidden while it could still be one (the
-  // check is monotone, so prose, once it appears, stays shown).
-  function isHiddenReply(index: number): boolean {
-    const m = msgs[index]
-    if (!m || m.type !== 'assistant') return false
-    if (m.streaming) {
-      const p = silentActionPanel(precedingSaid(msgs, index))
-      return p !== null && couldBeSilentReply(m.content)
-    }
-    return isSilentPairAt(msgs, index)
-  }
   const session = $derived($sessions.find(s => s.id === sid) ?? null)
   const title = $derived(session?.title || session?.name || $t('m.session'))
   // A confirmation raised for THIS session while it's open — surface an inline
@@ -185,9 +175,14 @@
     }
   })
 
-  // Keep pinned to the latest message as the transcript grows.
+  // Keep pinned to the latest message as the transcript grows — by what it
+  // draws (see visibleCount), and not while a silent panel turn is in flight:
+  // the view stays on the panel being used (the desktop's pin = !panelId). A
+  // reply that turns out visible adds a row, and that pins again.
+  const shown = $derived(visibleCount(msgs))
   $effect(() => {
-    void msgs.length
+    void shown
+    if (untrack(() => pendingPanel)) return
     tick().then(() => {
       if (scroller) scroller.scrollTop = scroller.scrollHeight
     })
@@ -283,10 +278,10 @@
           <div class="bubble user" class:pending={msg.pending}>{msg.content}</div>
         {/if}
       {/if}
-    {:else if msg.type === 'assistant' && isHiddenReply(i)}
+    {:else if msg.type === 'assistant' && isHiddenReplyAt(msgs, i)}
       <!-- The reply half of a silent turn, drawn into its panel above. -->
     {:else if msg.type === 'assistant'}
-      <div class="bubble agent">
+      <div class="bubble agent" class:wide={msg.content?.includes(FENCE_OPEN)}>
         {#if msg.thinking}<div class="thoughts">{@html renderMarkdown(msg.thinking)}</div>{/if}
         <div class="body">
           {#each splitOctoUiFences(msg.content) as seg, segIdx (segIdx)}
@@ -455,9 +450,9 @@
   }
   .bubble.user.pending { opacity: .6; }
   .bubble.user.action { font-size: 13px; opacity: .85; }
-  /* A panel needs the bubble's full width, and wraps its own text. */
-  .bubble.agent:has(.genui) { max-width: 100%; align-self: stretch; }
-  .genui { white-space: normal; margin: 6px 0; }
+  /* A panel needs the bubble's full width. */
+  .bubble.agent.wide { max-width: 100%; align-self: stretch; }
+  .genui { margin: 6px 0; }
   .bubble.agent {
     align-self: flex-start;
     background: var(--m-surface);
