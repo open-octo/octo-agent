@@ -9,7 +9,9 @@
 //
 // Deliberately omitted (desktop-only or a later batch): optimistic-send
 // bookkeeping / steer queues / rollback, the floating sub-agent & workflow
-// panels (their trails do show, inside the tool cards),
+// panels (their trails do show, inside the tool cards — though a synchronous
+// sub-agent's card only claims its trail once the tool returns, so it shows
+// no progress while it runs),
 // turn-error banner, next-message suggestions. Tool groups render through the
 // desktop ToolGroup, so the tool fields set here feed the same cards. Artifacts are
 // observed into the shared store, as on desktop, and the session's artifacts
