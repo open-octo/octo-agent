@@ -18,6 +18,7 @@ import { ws } from '../lib/ws'
 import { tr } from '../lib/i18n'
 import * as api from '../lib/api'
 import { inlineSlashCommand } from '../lib/inlineSlash'
+import type { Attachment } from '../lib/composerDrafts'
 import { appendLiveAfterHistory, isReplayedUserEcho } from '../lib/userEchoDedup'
 import { observeArtifact, resetArtifacts } from '../lib/artifacts'
 import {
@@ -104,9 +105,9 @@ export function loadMobileHistory(sid: string): Promise<void> {
 
 // Optimistically echo the user's message, mark the turn streaming, and send.
 // history_user_message reconciles the echo (see the handler below).
-export function sendMobile(sid: string, text: string, files?: unknown[]) {
+export function sendMobile(sid: string, text: string, files?: Attachment[]) {
   const t = text.trim()
-  if (!t) return
+  if (!t && !files?.length) return
   // Server-inline commands never enter history, so no history_user_message
   // comes back to reconcile the echo — it would spin forever. Mobile has no
   // slash menu, so these only arrive typed by hand, but /reload and /goal do
@@ -123,10 +124,16 @@ export function sendMobile(sid: string, text: string, files?: unknown[]) {
   }
   addChatMsg(sid, {
     id: uid('u'), type: 'user', content: t, createdAt: Date.now(),
-    streaming: false, pending: true, tools: [], todos: [], images: [],
+    streaming: false, pending: true, tools: [], todos: [], images: echoRefs(files),
   })
   chatStreaming.update(s => ({ ...s, [sid]: true }))
   ws.sendMessage(sid, t, files)
+}
+
+// The echo's attachment refs, in the shape history_user_message carries: an
+// image's data URL, or "pdf:<name>" for any other file (see docChipRefs).
+export function echoRefs(files?: Attachment[]): string[] {
+  return (files ?? []).map(f => f.data_url || `pdf:${f.name}`)
 }
 
 // Register the core WS handlers for a session. Returns a cleanup that removes
