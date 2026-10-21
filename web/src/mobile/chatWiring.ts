@@ -27,6 +27,7 @@ import {
   chatThinking,
   chatProgress,
   chatTodos,
+  chatPermMode,
   chatLastTextAt,
   chatGoal,
   addChatMsg,
@@ -361,6 +362,11 @@ export function wireMobileSession(sid: string): () => void {
 
   cleanups.push(ws.on('session_update', (ev: any) => {
     if (!forSid(ev)) return
+    // A permission-mode change from another client keeps the settings sheet
+    // current; partial pings carry no mode and must not clear it.
+    if (typeof ev.permission_mode === 'string' && ev.permission_mode) {
+      chatPermMode.update(m => ({ ...m, [sid]: ev.permission_mode }))
+    }
     // Mobile only needs the idle snapshot to clear a stale streaming indicator.
     if (ev.status === 'idle') {
       chatStreaming.update(s => ({ ...s, [sid]: false }))

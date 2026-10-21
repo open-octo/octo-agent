@@ -13,6 +13,7 @@
   import { renderMarkdown } from '../lib/markdown'
   import { t } from '../lib/i18n'
   import ArtifactsSheet from './ArtifactsSheet.svelte'
+  import SessionSettings from './SessionSettings.svelte'
   import AuthedImage from './AuthedImage.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import AttachmentStrip from './AttachmentStrip.svelte'
@@ -34,6 +35,7 @@
 
   const sid = $derived($activeSessionId ?? '')
   let showArtifacts = $state(false)
+  let showSettings = $state(false)
   const msgs = $derived($chatMessages[sid] ?? [])
   const steers = $derived($mobileSteers[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
@@ -157,13 +159,14 @@
   <button class="back" onclick={onBack} aria-label={$t('m.back')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-text)" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
   </button>
-  <div class="dtitle">
+  <button class="dtitle" onclick={() => (showSettings = true)} aria-haspopup="dialog">
     <span class="t">{title}</span>
     <span class="sub">
       <span class="d" class:live={streaming}></span>
       {streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
     </span>
-  </div>
+  </button>
   {#if $artifacts.length}
     <button class="arts" onclick={() => (showArtifacts = true)} aria-label={$t('m.artifacts')}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
@@ -171,6 +174,10 @@
     </button>
   {/if}
 </header>
+
+{#if showSettings && sid}
+  <SessionSettings sessionId={sid} onClose={() => (showSettings = false)} />
+{/if}
 
 {#if showArtifacts}
   <ArtifactsSheet onClose={() => (showArtifacts = false)} />
@@ -302,7 +309,7 @@
     cursor: pointer;
     box-shadow: var(--m-shadow-card);
   }
-  .dtitle { flex: 1; min-width: 0; }
+  .dtitle { flex: 1; min-width: 0; padding: 0; border: none; background: none; font: inherit; text-align: left; cursor: pointer; }
   .dtitle .t {
     display: block;
     font-size: 15px;

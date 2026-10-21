@@ -12,7 +12,7 @@ vi.mock('../lib/ws', () => ({
   },
 }))
 
-import { chatMessages, chatStreaming, toasts } from '../lib/stores'
+import { chatMessages, chatPermMode, chatStreaming, toasts } from '../lib/stores'
 import { echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
 
 describe('echoRefs', () => {
@@ -92,6 +92,13 @@ describe('sending while a turn runs', () => {
     sendMobile(sid, 'late')
     handlers.complete({ session_id: sid })
     expect(get(mobileSteers)[sid]).toEqual([])
+  })
+
+  it('follows a permission-mode change from another client, ignoring partial pings', () => {
+    chatPermMode.set({})
+    handlers.session_update({ session_id: sid, permission_mode: 'strict' })
+    handlers.session_update({ session_id: sid, status: 'running' })
+    expect(get(chatPermMode)[sid]).toBe('strict')
   })
 
   it('still echoes a send made while idle as a pending bubble', () => {
