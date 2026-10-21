@@ -4,7 +4,7 @@
   // desktop uses). Tool calls render through the desktop ToolGroup (same
   // expandable cards: command, output, diff, todo list); the composer is a
   // lightweight mobile input rather than the desktop Composer.
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import { get } from 'svelte/store'
   import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, chatContextUsage, chatGoal, sessions, clearMsgs, artifacts, showToast } from '../lib/stores'
   import { goalChip } from '../lib/goalChip'
@@ -20,6 +20,12 @@
   import SessionSettings from './SessionSettings.svelte'
   import AuthedImage from './AuthedImage.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
+  import GenuiBlock from '../components/genui/GenuiBlock.svelte'
+  import { splitOctoUiFences, FENCE_OPEN } from '../lib/genui/fence-split'
+  import { projectPanels, isAnchor } from '../lib/genui/projection'
+  import { silentActionPanel, precedingSaid, couldBeSilentReply, parseActionEnvelope, OCTO_UI_ACTION_PREFIX } from '../lib/genui/silent-turn'
+  import { isHiddenReplyAt, visibleCount } from './genuiView'
+  import type { GenuiActionEvent } from '../lib/genui/context'
   import AttachmentStrip from './AttachmentStrip.svelte'
   import { AttachmentTray } from './attachments.svelte'
 
@@ -43,6 +49,46 @@
   const msgs = $derived($chatMessages[sid] ?? [])
   const steers = $derived($mobileSteers[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
+
+  // ── GenUI: ```octo-ui fences in replies render as live panels ─────────────
+  // The desktop ChatView's rules, on the same shared helpers. Which version of
+  // each addressable panel (one with an id) is live, and where it renders:
+  // projectPanels scans every message's text and this runs on each streamed
+  // delta, so reuse the last result while the tail is still growing (80 ms,
+  // the desktop's render throttle) and recompute once it settles.
+  let panelCache: { sig: string; panels: ReturnType<typeof projectPanels>; at: number } | null = null
+  const panels = $derived.by(() => {
+    const last = msgs[msgs.length - 1]
+    const sig = `${msgs.length}:${last?.id ?? ''}:${last?.content?.length ?? 0}:${last?.streaming ?? false}`
+    if (panelCache && (panelCache.sig === sig || (last?.streaming && Date.now() - panelCache.at < 80))) return panelCache.panels
+    const next = projectPanels(msgs)
+    panelCache = { sig, panels: next, at: Date.now() }
+    return next
+  })
+  // An action is sent as an "[octo-ui-action] {...}" user turn. One from a
+  // panel with an id is a silent turn: neither it nor the reply that updates
+  // the panel draws a bubble. An anonymous panel's action shows as a chip.
+  function sendGenuiAction(event: GenuiActionEvent, panelId?: string) {
+    if (!sid) return
+    const body: Record<string, unknown> = { action: event.action, fields: event.fields }
+    if (panelId) body.panel = panelId
+    if (event.payload !== undefined) body.payload = event.payload
+    sendMobile(sid, `${OCTO_UI_ACTION_PREFIX}${JSON.stringify(body)}`)
+  }
+  // The panel waiting on a silent turn, gated on a turn actually running so
+  // one that errored out doesn't leave the panel disabled for good.
+  const pendingPanel = $derived.by(() => {
+    if (!streaming) return null
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (m.type === 'assistant') {
+        const p = silentActionPanel(precedingSaid(msgs, i))
+        return p && couldBeSilentReply(m.content) ? p : null
+      }
+      if (m.type === 'user') return silentActionPanel(m)
+    }
+    return null
+  })
   const session = $derived($sessions.find(s => s.id === sid) ?? null)
   const title = $derived(session?.title || session?.name || $t('m.session'))
   // A confirmation raised for THIS session while it's open — surface an inline
@@ -174,9 +220,14 @@
     }
   })
 
-  // Keep pinned to the latest message as the transcript grows.
+  // Keep pinned to the latest message as the transcript grows — by what it
+  // draws (see visibleCount), and not while a silent panel turn is in flight:
+  // the view stays on the panel being used (the desktop's pin = !panelId). A
+  // reply that turns out visible adds a row, and that pins again.
+  const shown = $derived(visibleCount(msgs))
   $effect(() => {
-    void msgs.length
+    void shown
+    if (untrack(() => pendingPanel)) return
     tick().then(() => {
       if (scroller) scroller.scrollTop = scroller.scrollHeight
     })
@@ -266,7 +317,9 @@
 
 <div class="scroll" bind:this={scroller}>
   {#each msgs as msg, i (msg.id)}
-    {#if msg.type === 'user'}
+    {#if msg.type === 'user' && silentActionPanel(msg)}
+      <!-- The user half of a silent turn: feedback lives on the panel. -->
+    {:else if msg.type === 'user'}
       {#if msg.images?.length}
         <div class="atts sent" class:pending={msg.pending}>
           {#each msg.images as ref, i (i)}
@@ -279,12 +332,41 @@
         </div>
       {/if}
       {#if msg.content}
-        <div class="bubble user" class:pending={msg.pending} class:editable={canEdit(i)} use:longpress={canEdit(i) ? () => startEdit(i) : null}>{msg.content}</div>
+        {@const action = parseActionEnvelope(msg.content)}
+        {#if action}
+          <!-- An anonymous panel's action: a chip, not the raw envelope. -->
+          <div class="bubble user action" class:pending={msg.pending}>{$t('chat.genui_action_triggered')}: {action.action}</div>
+        {:else}
+          <div class="bubble user" class:pending={msg.pending} class:editable={canEdit(i)} use:longpress={canEdit(i) ? () => startEdit(i) : null}>{msg.content}</div>
+        {/if}
       {/if}
+    {:else if msg.type === 'assistant' && isHiddenReplyAt(msgs, i)}
+      <!-- The reply half of a silent turn, drawn into its panel above. -->
     {:else if msg.type === 'assistant'}
-      <div class="bubble agent">
+      <div class="bubble agent" class:wide={msg.content?.includes(FENCE_OPEN)}>
         {#if msg.thinking}<div class="thoughts">{@html renderMarkdown(msg.thinking)}</div>{/if}
-        <div class="body">{@html renderMarkdown(msg.content)}{#if msg.streaming}<span class="caret">▋</span>{/if}</div>
+        <div class="body">
+          {#each splitOctoUiFences(msg.content) as seg, segIdx (segIdx)}
+            {#if seg.kind === 'markdown'}
+              {@html renderMarkdown(seg.text)}
+            {:else if seg.spec && isAnchor(panels, seg.spec, msg.id, segIdx)}
+              <!-- An addressable panel renders its newest version, which a
+                   silent turn may have replaced since this message. A spec the
+                   guard rejected (null) renders nothing, never raw text. -->
+              {@const live = seg.spec.id ? (panels.get(seg.spec.id)?.spec ?? seg.spec) : seg.spec}
+              <div class="genui">
+                <GenuiBlock
+                  spec={live}
+                  interactive={seg.complete}
+                  pending={!!seg.spec.id && pendingPanel === seg.spec.id}
+                  sessionId={sid}
+                  onaction={(a) => sendGenuiAction(a, seg.spec?.id)}
+                />
+              </div>
+            {/if}
+          {/each}
+          {#if msg.streaming}<span class="caret">▋</span>{/if}
+        </div>
       </div>
     {:else if msg.type === 'thinking'}
       <div class="thoughts standalone">{@html renderMarkdown(msg.thinking)}</div>
@@ -298,7 +380,10 @@
     <div class="steer">
       <span class="spin"></span>
       <span class="steer-body">
-        {#if s.content}<span class="steer-text">{s.content}</span>{/if}
+        {#if s.content}
+          {@const action = parseActionEnvelope(s.content)}
+          <span class="steer-text">{action ? `${$t('chat.genui_action_triggered')}: ${action.action}` : s.content}</span>
+        {/if}
         {#if s.images.length}
           <span class="atts">
             {#each s.images as ref, i (i)}
@@ -428,6 +513,10 @@
     border-radius: 14px 4px 14px 14px;
   }
   .bubble.user.pending { opacity: .6; }
+  .bubble.user.action { font-size: 13px; opacity: .85; }
+  /* A panel needs the bubble's full width. */
+  .bubble.agent.wide { max-width: 100%; align-self: stretch; }
+  .genui { margin: 6px 0; }
   /* Long press edits: keep iOS from selecting text or raising its callout. */
   .bubble.user.editable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .bubble.agent {
@@ -696,6 +785,10 @@
     box-shadow: var(--m-shadow-card);
   }
   /* ── Markdown rendering (adapted from desktop for mobile) ─────────────────── */
+  /* A reply is rendered HTML: .bubble's pre-wrap (for typed user text) would
+     turn the newlines between tags — and the template's own indentation —
+     into blank lines. (.thoughts sets its own pre-wrap.) */
+  .bubble.agent { white-space: normal; }
   .bubble.agent .body :global(p) { margin: 0; }
   .bubble.agent .body :global(p:not(:last-child)) { margin: 0 0 8px; }
   .bubble.agent .body :global(h1), .bubble.agent .body :global(h2), .bubble.agent .body :global(h3), .bubble.agent .body :global(h4) {

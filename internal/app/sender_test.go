@@ -475,7 +475,7 @@ func TestTestConnection_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "gpt-4o-mini", ""); err != nil {
+	if err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "gpt-4o-mini", "", nil); err != nil {
 		t.Fatalf("TestConnection: %v", err)
 	}
 }
@@ -490,7 +490,7 @@ func TestTestConnection_AuthFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := TestConnection(ctx, ProviderOpenAI, "bad-key", srv.URL, "gpt-4o-mini", "")
+	err := TestConnection(ctx, ProviderOpenAI, "bad-key", srv.URL, "gpt-4o-mini", "", nil)
 	if err == nil {
 		t.Fatal("expected error for bad key")
 	}
@@ -509,7 +509,7 @@ func TestTestConnection_InvalidModel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "unknown-model", "")
+	err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "unknown-model", "", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown model")
 	}
@@ -526,7 +526,7 @@ func TestTestConnection_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "gpt-4o-mini", "")
+	err := TestConnection(ctx, ProviderOpenAI, "test-key", srv.URL, "gpt-4o-mini", "", nil)
 	if err == nil {
 		t.Fatal("expected error for timeout")
 	}
@@ -534,14 +534,14 @@ func TestTestConnection_Timeout(t *testing.T) {
 
 func TestTestConnection_EmptyKey(t *testing.T) {
 	ctx := context.Background()
-	if err := TestConnection(ctx, ProviderOpenAI, "", "http://localhost", "x", ""); err == nil {
+	if err := TestConnection(ctx, ProviderOpenAI, "", "http://localhost", "x", "", nil); err == nil {
 		t.Error("expected error for empty key")
 	}
 }
 
 func TestTestConnection_UnknownProvider(t *testing.T) {
 	ctx := context.Background()
-	if err := TestConnection(ctx, "nope", "k", "http://localhost", "x", ""); err == nil {
+	if err := TestConnection(ctx, "nope", "k", "http://localhost", "x", "", nil); err == nil {
 		t.Error("expected error for unknown provider")
 	}
 }
