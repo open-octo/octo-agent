@@ -4,14 +4,16 @@ import { get } from 'svelte/store'
 const setSessionPinned = vi.fn()
 const updateSession = vi.fn()
 const deleteSessionApi = vi.fn()
+const getSessionMessages = vi.fn()
 vi.mock('../lib/api', () => ({
+  getSessionMessages: (id: string) => getSessionMessages(id),
   setSessionPinned: (id: string, pinned: boolean) => setSessionPinned(id, pinned),
   updateSession: (id: string, patch: unknown) => updateSession(id, patch),
   deleteSession: (id: string) => deleteSessionApi(id),
 }))
 
 import { activeSessionId, pinnedSessions, sessions, toasts } from '../lib/stores'
-import { togglePin, renameSession, deleteSession } from './sessionActions'
+import { togglePin, renameSession, deleteSession, copySessionMarkdown } from './sessionActions'
 
 beforeEach(() => {
   setSessionPinned.mockReset()
@@ -85,5 +87,42 @@ describe('renameSession / deleteSession', () => {
     await deleteSession('a')
     expect(get(sessions).map((s: any) => s.id)).toEqual(['a', 'b'])
     expect(get(toasts)[0]?.msg).toBe('locked')
+  })
+})
+
+describe('copySessionMarkdown', () => {
+  const writeText = vi.fn()
+  beforeEach(() => {
+    getSessionMessages.mockReset()
+    writeText.mockReset()
+    toasts.set([])
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  })
+
+  it('copies the transcript as Markdown, without tool calls', async () => {
+    getSessionMessages.mockResolvedValue({ events: [
+      { type: 'history_user_message', content: 'hi' },
+      { type: 'tool_call', name: 'terminal' },
+      { type: 'tool_result', result: 'ok' },
+      { type: 'assistant_message', content: 'hello' },
+    ] })
+    writeText.mockResolvedValue(undefined)
+    await copySessionMarkdown('a', 'Greeting')
+    expect(writeText).toHaveBeenCalledWith('# Greeting\n\n## You\n\nhi\n\n## Octo\n\nhello\n')
+    expect(get(toasts)[0]?.type).toBe('success')
+  })
+
+  it('reports an empty session instead of copying', async () => {
+    getSessionMessages.mockResolvedValue({ events: [] })
+    await copySessionMarkdown('a', 'Empty')
+    expect(writeText).not.toHaveBeenCalled()
+    expect(get(toasts)[0]?.type).toBe('error')
+  })
+
+  it('reports a refused clipboard', async () => {
+    getSessionMessages.mockResolvedValue({ events: [{ type: 'history_user_message', content: 'hi' }] })
+    writeText.mockRejectedValue(new DOMException('denied', 'NotAllowedError'))
+    await copySessionMarkdown('a', 'T')
+    expect(get(toasts)[0]).toMatchObject({ type: 'error', msg: 'Copy failed' })
   })
 })

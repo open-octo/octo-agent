@@ -29,6 +29,33 @@ export function applyToolToggle(
 // scroll.
 export const TOOL_RESULT_CHARS = 500
 
+// The Markdown export of a transcript: a heading per speaker, thoughts folded
+// into <details>, tool results cut at TOOL_RESULT_CHARS. Shared by the desktop
+// export bar and the phone's "copy as Markdown".
+export function buildExportMarkdown(events: any[], title: string): string {
+  const lines: string[] = [`# ${title}`, '']
+  for (const ev of events) {
+    const type = ev.type ?? ''
+    if (type === 'history_user_message') {
+      lines.push('## You', '')
+      lines.push(ev.content ?? '', '')
+    } else if (type === 'assistant_message') {
+      lines.push('## Octo', '')
+      if (ev.thinking) {
+        lines.push('<details><summary>Thoughts</summary>', '', ev.thinking, '', '</details>', '')
+      }
+      lines.push(ev.content ?? '', '')
+    } else if (type === 'thinking' && ev.text) {
+      lines.push('<!-- Thinking -->', ev.text, '')
+    } else if (type === 'tool_call') {
+      lines.push(`- **Tool call**: ${ev.tool_name ?? ev.name ?? 'unknown'}`, '')
+    } else if (type === 'tool_result') {
+      lines.push(`- **Tool result**: ${typeof ev.result === 'string' ? ev.result.slice(0, TOOL_RESULT_CHARS) : '(non-text result)'}`, '')
+    }
+  }
+  return lines.join('\n')
+}
+
 // Whether an export would carry any actual conversation.
 //
 // Counting events is not the same question: filterEventsBySelection passes

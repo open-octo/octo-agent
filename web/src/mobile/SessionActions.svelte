@@ -2,7 +2,7 @@
   // Bottom action sheet for one session, opened by a long press on its card.
   import { sessions, pinnedSessions } from '../lib/stores'
   import { t } from '../lib/i18n'
-  import { sessionActionsFor, togglePin, renameSession, deleteSession } from './sessionActions'
+  import { sessionActionsFor, togglePin, renameSession, deleteSession, copySessionMarkdown } from './sessionActions'
 
   const id = $derived($sessionActionsFor)
   const session = $derived(id ? $sessions.find(s => s.id === id) : undefined)
@@ -70,6 +70,14 @@
     void renameSession(target, name)
   }
 
+  function copyMarkdown() {
+    if (!id) return
+    const target = id
+    const title = session?.title || session?.name || $t('m.untitled')
+    close()
+    void copySessionMarkdown(target, title)
+  }
+
   function confirmDelete() {
     if (!id) return
     const target = id
@@ -103,6 +111,10 @@
         <button class="act" onclick={tapped(startRename)}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
           <span>{$t('sidebar.rename')}</span>
+        </button>
+        <button class="act" onclick={tapped(copyMarkdown)}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+          <span>{$t('m.copy_markdown')}</span>
         </button>
         <button class="act danger" onclick={tapped(() => (mode = 'delete'))}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>

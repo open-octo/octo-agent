@@ -76,7 +76,7 @@
   import { registerLaIframe, unregisterLaIframe, ensureLightAppStorage, lightappStorageReady } from '../lib/laStorage'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
   import { setupMermaid } from '../lib/mermaid'
-  import { applyToolToggle, buildExportConversation, exportConversationStyles, hasRenderableTurn, TOOL_RESULT_CHARS } from '../lib/exportTranscript'
+  import { applyToolToggle, buildExportConversation, buildExportMarkdown, exportConversationStyles, hasRenderableTurn } from '../lib/exportTranscript'
   import { t, tr, pickLocalized } from '../lib/i18n'
   import { insertPendingSend, takeConfirmedSend } from '../lib/pendingSendOrder'
   import { appendLiveAfterHistory, isReplayedUserEcho } from '../lib/userEchoDedup'
@@ -2069,31 +2069,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // a cancelled or failed native save. Events arrive already filtered by
   // exportEvents.
   async function exportAsMarkdown(events: any[], title: string): Promise<boolean> {
-    const lines: string[] = [`# ${title}`, '']
-
-    for (const ev of events) {
-      const type = ev.type ?? ''
-      if (type === 'history_user_message') {
-        lines.push('## You', '')
-        lines.push(ev.content ?? '', '')
-      } else if (type === 'assistant_message') {
-        lines.push('## Octo', '')
-        if (ev.thinking) {
-          lines.push('<details><summary>Thoughts</summary>', '', ev.thinking, '', '</details>', '')
-        }
-        lines.push(ev.content ?? '', '')
-      } else if (type === 'thinking' && ev.text) {
-        lines.push('<!-- Thinking -->', ev.text, '')
-      } else if (type === 'tool_call') {
-        lines.push(`- **Tool call**: ${ev.tool_name ?? ev.name ?? 'unknown'}`, '')
-      } else if (type === 'tool_result') {
-        lines.push(`- **Tool result**: ${typeof ev.result === 'string' ? ev.result.slice(0, TOOL_RESULT_CHARS) : '(non-text result)'}`, '')
-      }
-    }
-
-    const title_safe = filenameStem(title)
-    const content = lines.join('\n')
-    return deliverExport(content, `${title_safe}.md`, 'text/markdown')
+    return deliverExport(buildExportMarkdown(events, title), `${filenameStem(title)}.md`, 'text/markdown')
   }
 
   async function exportAsJSON(events: any[], title: string): Promise<boolean> {

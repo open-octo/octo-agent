@@ -5,6 +5,7 @@ import { get, writable } from 'svelte/store'
 import { activeSessionId, pinnedSessions, sessions, showToast } from '../lib/stores'
 import * as api from '../lib/api'
 import { tr } from '../lib/i18n'
+import { applyToolToggle, buildExportMarkdown, hasRenderableTurn } from '../lib/exportTranscript'
 
 /** Id of the session whose action sheet is open, or null. */
 export const sessionActionsFor = writable<string | null>(null)
@@ -35,6 +36,36 @@ export async function renameSession(sessionId: string, name: string): Promise<vo
     sessions.update(ss => ss.map(s => (s.id === sessionId ? { ...s, name: draft, title: draft } : s)))
   } catch (e: any) {
     showToast(e?.message ?? String(e), 'error')
+  }
+}
+
+// The session as Markdown — the desktop export's format, tool calls left out
+// as its default is. Rejects when there is nothing worth exporting.
+async function sessionMarkdown(sessionId: string, title: string): Promise<string> {
+  const data = await api.getSessionMessages(sessionId) as { events?: any[] }
+  const { events } = applyToolToggle(data.events ?? [], false)
+  if (!hasRenderableTurn(events)) throw new Error(tr('chat.nothing_to_export'))
+  return buildExportMarkdown(events, title)
+}
+
+// Copy the session as Markdown: the phone's export. The app's WebView can't
+// download a file, but it can fill the clipboard. The fetch runs inside the
+// clipboard write (a ClipboardItem holding a promise) so iOS, which only
+// allows a write during the tap, still accepts it once the text resolves.
+export async function copySessionMarkdown(sessionId: string, title: string): Promise<void> {
+  const text = sessionMarkdown(sessionId, title)
+  try {
+    if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then(t => new Blob([t], { type: 'text/plain' })) })])
+    } else {
+      await navigator.clipboard.writeText(await text)
+    }
+    showToast(tr('chat.copied'), 'success')
+  } catch (e: any) {
+    // A failed fetch or an empty session carries its own message; a refused
+    // clipboard surfaces as a DOMException, reported plainly.
+    const own = await text.then(() => null, (err: any) => err?.message ?? String(err))
+    showToast(own ?? tr('tools.copy_failed'), 'error')
   }
 }
 
