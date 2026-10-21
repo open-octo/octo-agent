@@ -9,8 +9,8 @@
 //
 // Deliberately omitted (desktop-only or a later batch): optimistic-send
 // bookkeeping / steer queues / rollback, sub-agent & workflow panels,
-// turn-error banner, next-message suggestions. Mobile chat is a simplified
-// view; the detailed tool/progress rendering is batch 2. Artifacts are
+// turn-error banner, next-message suggestions. Tool groups render through the
+// desktop ToolGroup, so the tool fields set here feed the same cards. Artifacts are
 // observed into the shared store, as on desktop, and the session's artifacts
 // sheet (ArtifactsSheet) renders them.
 import { get } from 'svelte/store'

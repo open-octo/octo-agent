@@ -1,8 +1,8 @@
 <script lang="ts">
   // Mobile chat detail: renders a session's transcript and sends replies, wired
   // to the shared stores via chatWiring (which reuses the same store helpers the
-  // desktop uses). A simplified view — tool cards are collapsed to a one-line
-  // hint (the detailed tool/progress view is batch 2), and the composer is a
+  // desktop uses). Tool calls render through the desktop ToolGroup (same
+  // expandable cards: command, output, diff, todo list); the composer is a
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
   import { activeSessionId, chatMessages, chatStreaming, sessions, clearMsgs, artifacts } from '../lib/stores'
@@ -13,6 +13,7 @@
   import { t } from '../lib/i18n'
   import ArtifactsSheet from './ArtifactsSheet.svelte'
   import AuthedImage from './AuthedImage.svelte'
+  import ToolGroup from '../components/chat/ToolGroup.svelte'
   import AttachmentStrip from './AttachmentStrip.svelte'
   import { AttachmentTray } from './attachments.svelte'
 
@@ -102,13 +103,6 @@
       send()
     }
   }
-
-  // Takes the reactive $t so the fallback re-renders on locale flip.
-  function toolLabel(tools: any[], tf: (k: string) => string): string {
-    if (!tools?.length) return ''
-    const names = tools.map(tl => tl.name).filter(Boolean)
-    return names.length ? names.join(' · ') : tf('m.n_tools').replace('{n}', String(tools.length))
-  }
 </script>
 
 <header class="dhead">
@@ -167,10 +161,7 @@
     {:else if msg.type === 'thinking'}
       <div class="thoughts standalone">{@html renderMarkdown(msg.thinking)}</div>
     {:else if msg.type === 'tool_group'}
-      <div class="tools">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-3)" stroke-width="2"><path d="M14.7 6.3a4 4 0 0 1-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5z"/></svg>
-        <span>{toolLabel(msg.tools, $t)}</span>
-      </div>
+      <div class="tools"><ToolGroup tools={msg.tools} streaming={msg.streaming} /></div>
     {:else if msg.type === 'notice'}
       <div class="notice" class:err={msg.level === 'error'}>{msg.content}</div>
     {/if}
@@ -315,13 +306,8 @@
   @keyframes bk { 50% { opacity: .2 } }
   @media (prefers-reduced-motion: reduce) { .caret { animation: none } }
   .tools {
-    align-self: flex-start;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--m-text-3);
-    font-family: ui-monospace, Menlo, monospace;
+    align-self: stretch;
+    min-width: 0;
   }
   .notice {
     align-self: center;
