@@ -108,6 +108,9 @@
     // chatTodos outlives this view, and the server doesn't replay a plan that
     // finished meanwhile — drop it; an unfinished one comes back on subscribe.
     chatTodos.update(t => ({ ...t, [s]: [] }))
+    // Same for pending steers: one picked up while the chat was closed is in
+    // the history now, or its echo comes back in the subscribe replay.
+    mobileSteers.update(m => ({ ...m, [s]: [] }))
     let cancelled = false
     // Subscribe only after history renders (same ordering the desktop relies on).
     loadMobileHistory(s).then(() => {
@@ -230,7 +233,7 @@
     {/if}
   {/each}
   {#each steers as s (s.id)}
-    <div class="steer" title={$t('status.running')}>
+    <div class="steer">
       <span class="spin"></span>
       <span class="steer-body">
         {#if s.content}<span class="steer-text">{s.content}</span>{/if}

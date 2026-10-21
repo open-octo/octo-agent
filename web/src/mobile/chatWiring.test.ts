@@ -80,6 +80,20 @@ describe('sending while a turn runs', () => {
     expect(get(toasts)[0]?.msg).toBe('busy')
   })
 
+  it('matches a steer whose echo carries document notes', () => {
+    sendMobile(sid, 'see attached', [{ name: 'spec.pdf', path: '/api/uploads/1_spec.pdf' }])
+    handlers.history_user_message({ session_id: sid, content: 'see attached\n\n[Attached file: /home/me/.octo/uploads/1_spec.pdf]', created_at: 3 })
+    expect(get(mobileSteers)[sid]).toEqual([])
+    expect(ids()[1]).toMatch(/^user:see attached/)
+    expect(ids()[2]).toBe('assistant:working on it')
+  })
+
+  it('drops steers the turn ended without picking up', () => {
+    sendMobile(sid, 'late')
+    handlers.complete({ session_id: sid })
+    expect(get(mobileSteers)[sid]).toEqual([])
+  })
+
   it('still echoes a send made while idle as a pending bubble', () => {
     chatStreaming.set({ [sid]: false })
     sendMobile(sid, 'next')

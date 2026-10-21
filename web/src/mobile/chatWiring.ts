@@ -208,7 +208,14 @@ export function wireMobileSession(sid: string): () => void {
     // ahead of the streaming reply. A replayed echo (mid-turn resubscribe) of
     // one already placed matches no pending steer and falls through.
     const steers = get(mobileSteers)[sid] ?? []
-    const si = steers.findIndex(s => s.content === content)
+    let si = steers.findIndex(s => s.content === content)
+    if (si < 0 && steers.length) {
+      // No exact match — the server appends document notes to a steer's text
+      // before echoing it. Retire the oldest steer instead, as the desktop's
+      // FIFO does, unless this is the echo of a pending idle send.
+      const pend = (get(chatMessages)[sid] ?? []).findLast((x: any) => x.type === 'user' && x.pending)
+      if (pend?.content !== content) si = 0
+    }
     if (si >= 0 && !isReplayedUserEcho(get(chatMessages)[sid] ?? [], content, createdAt)) {
       mobileSteers.update(m => ({ ...m, [sid]: steers.filter((_, i) => i !== si) }))
       chatMessages.update(m => ({
@@ -279,6 +286,9 @@ export function wireMobileSession(sid: string): () => void {
 
   cleanups.push(ws.on('complete', (ev: any) => {
     if (!forSid(ev)) return
+    // Anything the turn didn't pick up runs as a turn of its own, echoed then
+    // like any fresh send — no longer a pending steer of this one.
+    mobileSteers.update(m => ({ ...m, [sid]: [] }))
     chatStreaming.update(s => ({ ...s, [sid]: false }))
     chatProgress.update(p => ({ ...p, [sid]: null }))
     chatMessages.update(m => {
@@ -371,6 +381,7 @@ export function wireMobileSession(sid: string): () => void {
   // lands after it.
   cleanups.push(ws.on('history_rollback', (ev: any) => {
     if (!forSid(ev)) return
+    mobileSteers.update(m => ({ ...m, [sid]: [] }))
     clearMsgs(sid)
     loadMobileHistory(sid)
   }))
