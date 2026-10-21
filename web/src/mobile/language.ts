@@ -23,12 +23,25 @@ export function pinnedLocale(): 'en' | 'zh' | null {
   return c === 'server' ? null : c
 }
 
-// serverLanguage is the config's language, applied when switching back to
-// following the server.
-export function setLang(c: LangChoice, serverLanguage: string): void {
+// Bumped by every choice, so a server-language fetch that resolves after a
+// later pick is dropped instead of undoing it.
+let choiceSeq = 0
+
+export function pinLang(l: 'en' | 'zh'): void {
+  choiceSeq++
   try {
-    if (c === 'server') localStorage.removeItem(KEY)
-    else localStorage.setItem(KEY, c)
+    localStorage.setItem(KEY, l)
   } catch { /* storage blocked: the choice lasts this run only */ }
-  setLocale(c === 'server' ? serverLanguage || 'en' : c)
+  setLocale(l)
+}
+
+// Unpins at once, then applies the server's language once fetched. A failed
+// fetch or an empty language leaves the current locale, as boot does.
+export async function followServer(fetchLanguage: () => Promise<string>): Promise<void> {
+  const seq = ++choiceSeq
+  try {
+    localStorage.removeItem(KEY)
+  } catch { /* nothing stored to clear */ }
+  const l = await fetchLanguage().catch(() => '')
+  if (seq === choiceSeq && l) setLocale(l)
 }

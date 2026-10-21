@@ -43,6 +43,11 @@
   import Toast from './components/overlays/Toast.svelte'
   import { touchSession, markSessionSeen, markActiveSessionSeenOnLeave, sessionTouchedAt } from './lib/unread'
 
+  // A phone may pin its own language over the server's (mobile/language.ts).
+  // Applied before the first render so the splash and onboarding use it too.
+  const pinned = mobileShell ? pinnedLocale() : null
+  if (pinned) setLocale(pinned)
+
   // The session on screen is read by definition — this is the only place the
   // sidebar's unread dot gets cleared. It re-marks on every list change and
   // every observed turn ending rather than once on selection, so a reply that
@@ -268,16 +273,13 @@
   function bootMain() {
     ws.connect()
 
-    // A phone may pin its own language over the server's (mobile/language.ts).
-    const pinned = mobileShell ? pinnedLocale() : null
-    if (pinned) setLocale(pinned)
-
     // Restore the persisted UI language from server config so a refresh
     // keeps the user's locale choice. Also seed globalPermissionMode and
     // globalReasoningEffort, so the Composer's no-active-session fallback
     // shows the real configured defaults instead of a hardcoded guess.
     api.getConfig().then(cfg => {
-      if (cfg.language && !pinned) setLocale(cfg.language)
+      // Read the pin live: it may have been set while this was in flight.
+      if (cfg.language && !(mobileShell && pinnedLocale())) setLocale(cfg.language)
       // PR5: permission_mode is global (was per-default-entry before). The
       // Composer reads this to seed its no-active-session fallback.
       if (cfg.permission_mode) globalPermissionMode.set(cfg.permission_mode)

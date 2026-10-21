@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { locale } from '../lib/i18n'
-import { getLang, pinnedLocale, setLang } from './language'
+import { getLang, pinnedLocale, pinLang, followServer } from './language'
 
 // jsdom exposes no localStorage under Node 26 (see unread.test.ts).
 const backing = new Map<string, string>()
@@ -24,17 +24,34 @@ describe('mobile language', () => {
   })
 
   it('pins this device and applies the locale at once', () => {
-    setLang('zh', 'en')
+    pinLang('zh')
     expect(getLang()).toBe('zh')
     expect(pinnedLocale()).toBe('zh')
     expect(get(locale)).toBe('zh')
   })
 
-  it('going back to the server applies its language and clears the pin', () => {
-    setLang('zh', 'en')
-    setLang('server', 'zh-TW')
+  it('following the server again clears the pin and applies its language', async () => {
+    pinLang('en')
+    await followServer(async () => 'zh')
     expect(pinnedLocale()).toBeNull()
-    expect(get(locale)).toBe('zh-TW')
+    expect(get(locale)).toBe('zh')
+  })
+
+  it('a failed server fetch unpins but keeps the current locale', async () => {
+    pinLang('zh')
+    await followServer(() => Promise.reject(new Error('offline')))
+    expect(pinnedLocale()).toBeNull()
+    expect(get(locale)).toBe('zh')
+  })
+
+  it('a pick made while the server fetch is in flight wins', async () => {
+    let resolve!: (l: string) => void
+    const pending = followServer(() => new Promise<string>(r => { resolve = r }))
+    pinLang('zh')
+    resolve('en')
+    await pending
+    expect(pinnedLocale()).toBe('zh')
+    expect(get(locale)).toBe('zh')
   })
 
   it('treats an unknown stored value as following the server', () => {

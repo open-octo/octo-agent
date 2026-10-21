@@ -7,7 +7,7 @@
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import { t } from '../lib/i18n'
   import * as api from '../lib/api'
-  import { getLang, setLang, type LangChoice } from './language'
+  import { getLang, pinLang, followServer, type LangChoice } from './language'
 
   let mode = $state<ThemeMode>(getMode())
   const themes: { m: ThemeMode; key: string }[] = [
@@ -27,11 +27,10 @@
     { c: 'en', label: 'English' },
     { c: 'zh', label: '简体中文' },
   ]
-  async function pickLang(c: LangChoice) {
+  function pickLang(c: LangChoice) {
     lang = c
-    // Following the server again needs its current language.
-    const server = c === 'server' ? await api.getConfig().then(cfg => cfg.language ?? '').catch(() => '') : ''
-    setLang(c, server)
+    if (c === 'server') followServer(() => api.getConfig().then(cfg => cfg.language ?? ''))
+    else pinLang(c)
   }
 
   let version = $state('')
