@@ -115,7 +115,7 @@
     {:else if tab === 'tasks'}
       <TasksTab onOpenSession={(id) => { tab = 'chat'; openSession(id, 'running') }} />
     {:else}
-      <ConfigTab />
+      <ConfigTab onAgentSession={(id, prompt) => { tab = 'chat'; openSession(id, 'running'); initial = { id, prompt, files: [] } }} />
     {/if}
   </main>
 

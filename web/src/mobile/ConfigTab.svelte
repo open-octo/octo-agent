@@ -43,15 +43,22 @@
   // Me tab: the server's capability inventory — Light Apps, skills, MCP
   // servers, workflows, memories — and trash as a root list drilling into
   // per-kind sections, followed by the app's own preferences and about. Remote-control scope: Light Apps open full-screen,
-  // skills/MCP get enable switches, the rest are read-only inventories;
-  // installing/editing stays on desktop.
+  // skills/MCP get enable switches; memories can be read, forgotten or handed
+  // to the assistant to update, trashed files restored or deleted (the
+  // desktop Profile / File Recall actions); workflows are read-only.
   import { onMount } from 'svelte'
-  import { showToast } from '../lib/stores'
+  import { showToast, prependSession } from '../lib/stores'
+  import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
   import PageViewer from './PageViewer.svelte'
   import Prefs from './Prefs.svelte'
   import { pageSrc } from './pageURL'
+
+  let { onAgentSession }: {
+    // A fresh session plus the first message to send once its chat is open.
+    onAgentSession: (id: string, prompt: string) => void
+  } = $props()
 
   const mcpStatusKey: Record<McpInfo['status'], string> = {
     connected: 'm.mcp_connected', error: 'm.mcp_error', disabled: 'm.mcp_disabled',
@@ -150,6 +157,90 @@
 
   // The app being viewed. Its page loads from a token URL the server grants:
   // the app's frame carries no access-key cookie (pageURL.ts).
+  // ── memories: read on tap, forget, or hand to the assistant ───────────────
+  let openMem = $state<string | null>(null)
+  let memBody = $state<Record<string, string>>({})
+  async function toggleMem(m: Memory) {
+    const key = m.source + m.name
+    openMem = openMem === key ? null : key
+    if (openMem !== key || memBody[key] !== undefined) return
+    memBody = { ...memBody, [key]: '' }
+    try {
+      const d = await api.getMemory(m.name, m.source)
+      memBody = { ...memBody, [key]: d.content ?? '' }
+    } catch {
+      memBody = { ...memBody, [key]: tr('m.load_failed') }
+    }
+  }
+  // One pending confirmation at a time across both lists, keyed by row.
+  let confirming = $state<string | null>(null)
+  let busyRow = $state<string | null>(null)
+  async function forgetMem(m: Memory) {
+    const key = m.source + m.name
+    confirming = null
+    busyRow = key
+    try {
+      await api.deleteMemory(m.name, m.source)
+      memories = memories.filter(x => x.source + x.name !== key)
+      showToast(tr('m.memory_forgotten'))
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+    } finally {
+      busyRow = null
+    }
+  }
+  // The desktop Profile page's "update" action: a fresh chat with the same ask.
+  let opening = $state(false)
+  async function reviewMemories() {
+    if (opening) return
+    opening = true
+    try {
+      const sess = await api.createSession({ source: 'manual', name: tr('profile.session_memories') })
+      prependSession(sess)
+      onAgentSession(sess.id, 'Review my saved memories and help me update or remove any that are stale.')
+    } catch (e: any) {
+      showToast(e?.message ?? tr('m.create_fail'), 'error')
+    } finally {
+      opening = false
+    }
+  }
+
+  // ── trash: restore (backing up whatever now sits at the path) or delete ───
+  // A restore that finds the original path taken asks first, then backs the
+  // current file up into the trash and restores — the desktop's lossless way.
+  async function restore(f: TrashEntry, backup = false) {
+    confirming = null
+    busyRow = f.id
+    try {
+      const res = await api.restoreTrash(f.id, backup ? 'backup' : undefined)
+      if (!res.ok) {
+        confirming = `restore:${f.id}`
+        return
+      }
+      trash = trash.filter(x => x.id !== f.id)
+      showToast(tr('files.toast_restored'), 'success')
+      // The backed-up file is a new trash entry.
+      if (res.backedUpExisting) load()
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+    } finally {
+      busyRow = null
+    }
+  }
+  async function deleteForGood(f: TrashEntry) {
+    confirming = null
+    busyRow = f.id
+    try {
+      await api.deleteTrashItem(f.id)
+      trash = trash.filter(x => x.id !== f.id)
+      showToast(tr('files.toast_deleted'), 'success')
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+    } finally {
+      busyRow = null
+    }
+  }
+
   let viewing = $state<{ slug: string; name: string; src: string; failed: boolean } | null>(null)
   async function openApp(app: api.LightApp) {
     viewing = { slug: app.slug, name: app.name || app.slug, src: '', failed: false }
@@ -281,23 +372,67 @@
     {#if memories.length === 0}<div class="empty">{$t('m.no_mem')}</div>{:else}
       <div class="card group">
         {#each memories as m (m.source + m.name)}
-          <div class="row">
-            <div class="names">
-              <span class="rlabel">{m.name}</span>
-              <span class="sub">{m.source} · {fmtBytes(m.size)}</span>
-            </div>
+          {@const key = m.source + m.name}
+          <div class="item">
+            <button class="row nav" onclick={() => toggleMem(m)} aria-expanded={openMem === key}>
+              <div class="names">
+                <span class="rlabel">{m.name}</span>
+                <span class="sub">{m.source} · {fmtBytes(m.size)}</span>
+              </div>
+              <span class="chev" class:open={openMem === key}>›</span>
+            </button>
+            {#if openMem === key}
+              <div class="detail">
+                {#if memBody[key]}<div class="md">{@html renderMarkdown(memBody[key])}</div>{:else}<div class="sub">{$t('m.loading')}</div>{/if}
+                {#if confirming === `forget:${key}`}
+                  <p class="ask">{$t('profile.confirm_forget').replace('{name}', m.name)}</p>
+                  <div class="acts">
+                    <button class="pill" onclick={() => (confirming = null)}>{$t('m.cancel')}</button>
+                    <button class="pill danger" onclick={() => forgetMem(m)}>{$t('profile.forget')}</button>
+                  </div>
+                {:else}
+                  <div class="acts">
+                    <button class="pill danger" disabled={busyRow === key} onclick={() => (confirming = `forget:${key}`)}>{$t('profile.forget')}</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
     {/if}
+    <p class="hint">{$t('profile.memories_hint')}</p>
+    <button class="wide-btn" disabled={opening} onclick={reviewMemories}>{$t('profile.update')}</button>
   {:else if section === 'trash'}
     {#if trash.length === 0}<div class="empty">{$t('m.trash_empty')}</div>{:else}
       <div class="card group">
         {#each trash as f (f.id)}
-          <div class="row">
-            <div class="names">
-              <span class="rlabel">{f.label || f.original.split('/').pop()}</span>
-              <span class="sub">{fmtBytes(f.size)} · {fmtDate(f.deleted_at)}{f.orphan ? ` · ${$t('m.orphan_dir')}` : ''}</span>
+          <div class="item">
+            <div class="row">
+              <div class="names">
+                <span class="rlabel">{f.label || f.original.split('/').pop()}</span>
+                <span class="sub">{fmtBytes(f.size)} · {fmtDate(f.deleted_at)}{f.orphan ? ` · ${$t('m.orphan_dir')}` : ''}</span>
+              </div>
+            </div>
+            <div class="detail">
+              {#if confirming === `restore:${f.id}`}
+                <p class="ask">{$t('files.confirm_restore_conflict').replace('{name}', f.original)}</p>
+                <div class="acts">
+                  <button class="pill" onclick={() => (confirming = null)}>{$t('m.cancel')}</button>
+                  <button class="pill strong" onclick={() => restore(f, true)}>{$t('files.restore')}</button>
+                </div>
+              {:else if confirming === `delete:${f.id}`}
+                <p class="ask">{$t('files.confirm_delete_one')}</p>
+                <div class="acts">
+                  <button class="pill" onclick={() => (confirming = null)}>{$t('m.cancel')}</button>
+                  <button class="pill danger" onclick={() => deleteForGood(f)}>{$t('files.delete_perm')}</button>
+                </div>
+              {:else}
+                <div class="acts">
+                  <button class="pill danger" disabled={busyRow === f.id} onclick={() => (confirming = `delete:${f.id}`)}>{$t('files.delete_perm')}</button>
+                  <button class="pill strong" disabled={busyRow === f.id} onclick={() => restore(f)}>{$t('files.restore')}</button>
+                </div>
+              {/if}
             </div>
           </div>
         {/each}
@@ -330,7 +465,31 @@
   .group { overflow: hidden; margin-bottom: 14px; }
   .lbl { margin: 2px 2px 8px; font: 600 12px/1 system-ui; letter-spacing: .5px; text-transform: uppercase; color: var(--m-text-3); }
   .row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; width: 100%; }
-  .row + .row { border-top: 1px solid var(--m-divider); }
+  .row + .row, .item + .item { border-top: 1px solid var(--m-divider); }
+  .item .row.nav { border-top: none; }
+  .chev { flex: none; color: var(--m-text-4); font-size: 18px; transition: transform .15s; }
+  .chev.open { transform: rotate(90deg); }
+  .detail { padding: 0 16px 12px; }
+  .md { font-size: 13px; line-height: 1.5; color: var(--m-text-2); overflow-wrap: anywhere; }
+  .md :global(p) { margin: 0 0 6px; }
+  .md :global(pre) { white-space: pre-wrap; }
+  .ask { margin: 6px 0 0; font-size: 12.5px; color: var(--m-text-2); }
+  .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  .pill {
+    min-height: 34px; padding: 6px 14px; border-radius: 9999px;
+    border: 1px solid var(--m-border); background: none;
+    font-size: 12.5px; color: var(--m-text-2); font-family: inherit; cursor: pointer;
+  }
+  .pill.danger { color: var(--m-error); }
+  .pill.strong { color: var(--m-accent); }
+  .pill:disabled { opacity: .45; cursor: default; }
+  .hint { margin: 12px 4px 0; font-size: 12px; color: var(--m-text-3); }
+  .wide-btn {
+    display: block; width: 100%; margin-top: 10px; min-height: 44px; border-radius: 12px;
+    border: 1px solid var(--m-border); background: var(--m-surface); color: var(--m-accent);
+    font: inherit; font-size: 14px; cursor: pointer;
+  }
+  .wide-btn:disabled { opacity: .5; }
   .row.nav { background: none; border-left: none; border-right: none; border-bottom: none; font-family: inherit; cursor: pointer; text-align: left; min-height: 48px; }
   .row.nav:first-child { border-top: none; }
   .names { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
