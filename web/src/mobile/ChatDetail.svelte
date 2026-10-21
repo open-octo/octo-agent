@@ -105,6 +105,9 @@
     const s = sid
     if (!s) return
     clearMsgs(s)
+    // chatTodos outlives this view, and the server doesn't replay a plan that
+    // finished meanwhile — drop it; an unfinished one comes back on subscribe.
+    chatTodos.update(t => ({ ...t, [s]: [] }))
     let cancelled = false
     // Subscribe only after history renders (same ordering the desktop relies on).
     loadMobileHistory(s).then(() => {
