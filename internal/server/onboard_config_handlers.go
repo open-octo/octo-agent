@@ -833,7 +833,7 @@ func (s *Server) handleTestConfig(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
-	if err := app.TestConnection(ctx, providerName, key, req.BaseURL, req.Model, protocol); err != nil {
+	if err := app.TestConnection(ctx, providerName, key, req.BaseURL, req.Model, protocol, nil); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
 		return
 	}
@@ -1245,6 +1245,61 @@ func (s *Server) handleListRemoteModels(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "models": models})
+}
+
+// handleTestEndpoint: POST /api/config/endpoints/{id}/test {model}. Tests a
+// saved endpoint with its own stored connection — env key first, then its
+// stored key, its base URL and its headers — the way real requests reach it.
+// handleTestConfig instead tests unsaved form values and can only guess the
+// stored key from provider + base URL, which picks the wrong one when two
+// endpoints share a provider, and it has no headers. Like that handler, a
+// failed upstream call is a normal {ok:false} result.
+func (s *Server) handleTestEndpoint(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := readBodyJSON(r, &req); err != nil {
+		writeInvalidJSONBody(w, err)
+		return
+	}
+	if req.Model == "" {
+		writeError(w, http.StatusBadRequest, "model is required")
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var ep config.Endpoint
+	found := false
+	for _, e := range cfg.Endpoints {
+		if e.ID == id {
+			ep, found = e, true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("endpoint %q not found", id))
+		return
+	}
+
+	key := os.Getenv(app.VendorAPIKeyEnvVar(ep.Provider))
+	if key == "" {
+		key = ep.APIKey
+	}
+	if key == "" && !app.VendorKeyOptional(ep.Provider) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no API key provided"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	if err := app.TestConnection(ctx, ep.Provider, key, ep.BaseURL, req.Model, ep.Protocol, ep.Headers); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Connection successful"})
 }
 
 // handleDeleteEndpointModel: DELETE /api/config/endpoints/{id}/models/{model}

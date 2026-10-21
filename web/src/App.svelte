@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, globalReasoningEffort, nativeShell, mobileShell, panelContent, panelExpanded, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell, readLastRoute, writeLastRoute } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
+  import { pinnedLocale } from './mobile/language'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
   import { locale, t, tr, setLocale } from './lib/i18n'
@@ -41,6 +42,11 @@
   import FeedbackModal from './components/overlays/FeedbackModal.svelte'
   import Toast from './components/overlays/Toast.svelte'
   import { touchSession, markSessionSeen, markActiveSessionSeenOnLeave, sessionTouchedAt } from './lib/unread'
+
+  // A phone may pin its own language over the server's (mobile/language.ts).
+  // Applied before the first render so the splash and onboarding use it too.
+  const pinned = mobileShell ? pinnedLocale() : null
+  if (pinned) setLocale(pinned)
 
   // The session on screen is read by definition — this is the only place the
   // sidebar's unread dot gets cleared. It re-marks on every list change and
@@ -272,7 +278,8 @@
     // globalReasoningEffort, so the Composer's no-active-session fallback
     // shows the real configured defaults instead of a hardcoded guess.
     api.getConfig().then(cfg => {
-      if (cfg.language) setLocale(cfg.language)
+      // Read the pin live: it may have been set while this was in flight.
+      if (cfg.language && !(mobileShell && pinnedLocale())) setLocale(cfg.language)
       // PR5: permission_mode is global (was per-default-entry before). The
       // Composer reads this to seed its no-active-session fallback.
       if (cfg.permission_mode) globalPermissionMode.set(cfg.permission_mode)

@@ -502,7 +502,7 @@ func TestReportConnectionCheck(t *testing.T) {
 	defer func() { validateConnection = orig }()
 
 	var gotModel, gotBase string
-	validateConnection = func(ctx context.Context, provider, key, baseURL, model, protocol string) error {
+	validateConnection = func(ctx context.Context, provider, key, baseURL, model, protocol string, _ map[string]string) error {
 		gotModel, gotBase = model, baseURL
 		switch key {
 		case "bad":

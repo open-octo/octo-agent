@@ -1,10 +1,13 @@
 <script lang="ts">
-  // Preferences (appearance) and about (version): the tail of the Me tab's
-  // root (ConfigTab). Appearance switches the app-wide data-theme so it also
-  // flips the mobile UI's dark tokens live. There is no notification switch:
+  // Preferences (appearance, language) and about (version): the tail of the
+  // Me tab's root (ConfigTab). Appearance switches the app-wide data-theme so
+  // it also flips the mobile UI's dark tokens live; language is this device's
+  // own (language.ts). There is no notification switch:
   // the app's WebView has no Notification API and the app has no push.
   import { getMode, setMode, type ThemeMode } from '../lib/theme'
   import { t } from '../lib/i18n'
+  import * as api from '../lib/api'
+  import { getLang, pinLang, followServer, type LangChoice } from './language'
 
   let mode = $state<ThemeMode>(getMode())
   const themes: { m: ThemeMode; key: string }[] = [
@@ -15,6 +18,19 @@
   function pickTheme(m: ThemeMode) {
     mode = m
     setMode(m)
+  }
+
+  // Language names stay in their own language, as on the desktop's picker.
+  let lang = $state<LangChoice>(getLang())
+  const langs: { c: LangChoice; label: string }[] = [
+    { c: 'server', label: '' },
+    { c: 'en', label: 'English' },
+    { c: 'zh', label: '简体中文' },
+  ]
+  function pickLang(c: LangChoice) {
+    lang = c
+    if (c === 'server') followServer(() => api.getConfig().then(cfg => cfg.language ?? ''))
+    else pinLang(c)
   }
 
   let version = $state('')
@@ -36,6 +52,14 @@
       {/each}
     </div>
   </div>
+  <div class="row col">
+    <span class="rlabel">{$t('settings.language')}</span>
+    <div class="seg">
+      {#each langs as l (l.c)}
+        <button class="segi" class:on={lang === l.c} aria-pressed={lang === l.c} onclick={() => pickLang(l.c)}>{l.label || $t('m.lang_server')}</button>
+      {/each}
+    </div>
+  </div>
 </div>
 
 <p class="lbl">{$t('m.about')}</p>
@@ -52,6 +76,7 @@
   .group { overflow: hidden; margin-bottom: 14px; }
   .row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
   .row.col { flex-direction: column; align-items: stretch; gap: 10px; }
+  .row + .row { border-top: 1px solid var(--m-divider); }
   .rlabel { flex: 1; font-size: 14.5px; color: var(--m-text); }
   .rval { flex: none; font-size: 12px; color: var(--m-text-3); }
   .mono { font-family: ui-monospace, Menlo, monospace; }

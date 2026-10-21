@@ -44,7 +44,7 @@ func TestTestConnection_CustomKeyless_OpenAIProtocol(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := TestConnection(ctx, ProviderCustom, "", srv.URL+"/v1", "qwen3-coder:30b", "openai"); err != nil {
+	if err := TestConnection(ctx, ProviderCustom, "", srv.URL+"/v1", "qwen3-coder:30b", "openai", nil); err != nil {
 		t.Fatalf("TestConnection keyless custom: %v", err)
 	}
 	if sawAuth {
@@ -62,7 +62,7 @@ func TestTestConnection_CustomKeyless_AnthropicProtocol(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := TestConnection(ctx, ProviderCustom, "", srv.URL, "m", "anthropic"); err != nil {
+	if err := TestConnection(ctx, ProviderCustom, "", srv.URL, "m", "anthropic", nil); err != nil {
 		t.Fatalf("TestConnection keyless custom (anthropic): %v", err)
 	}
 	if sawKey {
@@ -84,7 +84,7 @@ func TestTestConnection_CustomResponsesProtocol(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := TestConnection(ctx, ProviderCustom, "k", srv.URL+"/v1", "m", "openai-responses"); err != nil {
+	if err := TestConnection(ctx, ProviderCustom, "k", srv.URL+"/v1", "m", "openai-responses", nil); err != nil {
 		t.Fatalf("TestConnection (openai-responses): %v", err)
 	}
 	if path != "/v1/responses" || auth != "Bearer k" {
