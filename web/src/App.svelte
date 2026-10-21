@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { view, sessions, sessionGroups, pinnedSessions, collapsedSessions, activeSessionId, onboardPhase, openAgentSession, chatShowReasoning, globalPermissionMode, globalReasoningEffort, nativeShell, mobileShell, panelContent, panelExpanded, cmdkOpen, settingsModalOpen, createNewSession, clearPendingSessionOpts, isDesktopShell, readLastRoute, writeLastRoute } from './lib/stores'
   import MobileApp from './mobile/MobileApp.svelte'
+  import { pinnedLocale } from './mobile/language'
   import { ws, wsState } from './lib/ws'
   import { notificationsEnabled } from './lib/notifications'
   import { locale, t, tr, setLocale } from './lib/i18n'
@@ -267,12 +268,16 @@
   function bootMain() {
     ws.connect()
 
+    // A phone may pin its own language over the server's (mobile/language.ts).
+    const pinned = mobileShell ? pinnedLocale() : null
+    if (pinned) setLocale(pinned)
+
     // Restore the persisted UI language from server config so a refresh
     // keeps the user's locale choice. Also seed globalPermissionMode and
     // globalReasoningEffort, so the Composer's no-active-session fallback
     // shows the real configured defaults instead of a hardcoded guess.
     api.getConfig().then(cfg => {
-      if (cfg.language) setLocale(cfg.language)
+      if (cfg.language && !pinned) setLocale(cfg.language)
       // PR5: permission_mode is global (was per-default-entry before). The
       // Composer reads this to seed its no-active-session fallback.
       if (cfg.permission_mode) globalPermissionMode.set(cfg.permission_mode)
