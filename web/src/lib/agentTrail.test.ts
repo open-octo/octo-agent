@@ -132,4 +132,32 @@ describe('agentRunTrails (transcript review)', () => {
     expect(t.workflows['wf_9']).toMatchObject({ status: 'error', logs: ['phase: a'] })
     expect(t.workflows['wf_9'].agents[0]).toMatchObject({ id: 'a1', error: 'boom' })
   })
+
+  it('folds a replay of a running sub-agent idempotently', () => {
+    const sid = 'replay-1'
+    const events = [
+      { agent_id: 'agent_1', kind: 'started', description: 'scan' },
+      { agent_id: 'agent_1', kind: 'tool', tool_id: 't1', tool_name: 'grep' },
+      { agent_id: 'agent_1', kind: 'tool_done', tool_id: 't1', tool_name: 'grep', tool_output: '3 hits' },
+      { agent_id: 'agent_1', kind: 'text', text: 'looking further' },
+      { agent_id: 'agent_1', kind: 'tool', tool_id: 't2', tool_name: 'read_file' },
+    ]
+    for (const ev of events) recordAgentTrailEvent(sid, ev)
+    // A resubscribe replays the retained events on top.
+    for (const ev of events) recordAgentTrailEvent(sid, ev)
+    const steps = get(agentRunTrails)[sid].subAgents['agent_1'].steps
+    expect(steps.map((s: any) => s.kind === 'tool' ? `${s.id}:${s.done}` : s.text)).toEqual(['t1:true', 'looking further', 't2:false'])
+  })
+
+  it('restarts a workflow log on a replayed started', () => {
+    const sid = 'replay-2'
+    const events = [
+      { run_id: 'wf_1', kind: 'started', description: 'release' },
+      { run_id: 'wf_1', kind: 'progress', line: 'phase: build' },
+      { run_id: 'wf_1', kind: 'progress', line: 'phase: test' },
+    ]
+    for (const ev of events) recordWorkflowTrailEvent(sid, ev)
+    for (const ev of events) recordWorkflowTrailEvent(sid, ev)
+    expect(get(agentRunTrails)[sid].workflows['wf_1'].logs).toEqual(['phase: build', 'phase: test'])
+  })
 })

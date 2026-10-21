@@ -12,8 +12,8 @@ vi.mock('../lib/ws', () => ({
   },
 }))
 
-import { chatMessages, chatStreaming, toasts } from '../lib/stores'
-import { echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
+import { agentRunTrails, chatContextUsage, chatGoal, chatMessages, chatPermMode, chatStreaming, toasts } from '../lib/stores'
+import { agentRunNotice, echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
 
 describe('echoRefs', () => {
   it('maps images to their data URL and other files to a pdf: chip ref', () => {
@@ -94,10 +94,80 @@ describe('sending while a turn runs', () => {
     expect(get(mobileSteers)[sid]).toEqual([])
   })
 
+  it('feeds sub-agent trails and notes finished runs in the transcript', () => {
+    agentRunTrails.set({})
+    handlers.sub_agent_event({ session_id: sid, kind: 'started', agent_id: 'a1', description: 'scan repo' })
+    handlers.sub_agent_event({ session_id: sid, kind: 'tool', agent_id: 'a1', tool_name: 'grep' })
+    expect(get(agentRunTrails)[sid]?.subAgents.a1).toMatchObject({ description: 'scan repo', lastTool: 'grep', status: 'running' })
+    handlers.sub_agent_notice({ session_id: sid, agent_id: 'a1', description: 'scan repo', status: 'success' })
+    handlers.workflow_event({ session_id: sid, kind: 'step', run_id: 'w1' })
+    handlers.workflow_event({ session_id: sid, kind: 'done', run_id: 'w1', description: 'release', status: 'error' })
+    expect(ids().filter(x => x.startsWith('notice:'))).toEqual([
+      'notice:Sub-agent “scan repo” completed',
+      'notice:Workflow “release” failed',
+    ])
+  })
+
+  it('keeps the goal snapshot current and adds goal notices to the transcript', () => {
+    chatGoal.set({})
+    handlers.goal_updated({ session_id: sid, goal: { objective: 'ship it', status: 'active' } })
+    expect(get(chatGoal)[sid]).toMatchObject({ objective: 'ship it' })
+    handlers.goal_notice({ session_id: sid, kind: 'continue' })
+    handlers.goal_notice({ session_id: 'other', kind: 'continue' })
+    expect(ids().filter(x => x.startsWith('notice:'))).toEqual(['notice:Goal continues — /goal pause to stop'])
+  })
+
+  it('stamps the reply index from complete on the reply the turn produced', () => {
+    handlers.complete({ session_id: sid, message_index: 7 })
+    const msgs = get(chatMessages)[sid] as any[]
+    expect(msgs[1]).toMatchObject({ type: 'assistant', messageIndex: 7, streaming: false })
+    // A later complete without a new reply leaves the stamped one alone.
+    handlers.complete({ session_id: sid, message_index: 9 })
+    expect((get(chatMessages)[sid] as any[])[1].messageIndex).toBe(7)
+  })
+
+  it('follows a permission-mode change from another client, ignoring partial pings', () => {
+    chatPermMode.set({})
+    handlers.session_update({ session_id: sid, permission_mode: 'strict' })
+    handlers.session_update({ session_id: sid, status: 'running' })
+    expect(get(chatPermMode)[sid]).toBe('strict')
+  })
+
+  it('tracks context usage from session_update', () => {
+    chatContextUsage.set({})
+    handlers.session_update({ session_id: sid, context_usage: 63 })
+    handlers.session_update({ session_id: sid, status: 'running' })
+    expect(get(chatContextUsage)[sid]).toBe(63)
+  })
+
+  it('shifts message indices after a mid-turn compaction', () => {
+    chatMessages.update(m => ({ ...m, [sid]: [
+      { id: 'u0', type: 'user', content: 'old', messageIndex: 0 },
+      { id: 'u5', type: 'user', content: 'recent', messageIndex: 5 },
+    ] as any }))
+    handlers.history_reindex({ session_id: sid, folded_msgs: 3 })
+    const msgs = get(chatMessages)[sid] as any[]
+    expect(msgs[0].messageIndex).toBeUndefined()
+    expect(msgs[1].messageIndex).toBe(3)
+  })
+
   it('still echoes a send made while idle as a pending bubble', () => {
     chatStreaming.set({ [sid]: false })
     sendMobile(sid, 'next')
     expect(get(mobileSteers)[sid] ?? []).toEqual([])
     expect(ids()).toEqual(['user:start', 'assistant:working on it', 'user:next'])
+  })
+})
+
+describe('agentRunNotice', () => {
+  it('words each sub-agent outcome like the desktop', () => {
+    expect(agentRunNotice({ type: 'sub_agent_notice', agent_id: 'a', status: 'warning' })).toEqual({ text: 'Sub-agent “a” incomplete', level: 'warning' })
+    expect(agentRunNotice({ type: 'sub_agent_notice', agent_id: 'a', status: 'cancelled' })?.level).toBe('warning')
+    expect(agentRunNotice({ type: 'sub_agent_notice', agent_id: 'a', status: 'boom' })?.level).toBe('error')
+  })
+
+  it('only notes a finished workflow', () => {
+    expect(agentRunNotice({ type: 'workflow_event', kind: 'step', run_id: 'w' })).toBeNull()
+    expect(agentRunNotice({ type: 'workflow_event', kind: 'done', run_id: 'w' })).toEqual({ text: 'Workflow “w” completed', level: 'success' })
   })
 })

@@ -884,8 +884,14 @@ export interface SubAgentEventPayload {
 // foldTrailStep folds one tool/text event into a steps array (mutates steps —
 // callers pass a fresh copy). Kind arrives already stripped of any "agent_"
 // prefix so sub-agent and workflow-agent events share the fold.
+//
+// Idempotent under replay: every (re)subscribe replays a running sub-agent's
+// retained events, on top of steps already folded live or hydrated from
+// agent-runs, so a tool already seen by id, a completion already applied, or
+// a text already present is not added again.
 export function foldTrailStep(steps: AgentTrailStep[], kind: string, ev: SubAgentEventPayload): void {
   if (kind === 'tool') {
+    if (ev.tool_id && steps.some(st => st.kind === 'tool' && st.id === ev.tool_id)) return
     steps.push({ kind: 'tool', id: ev.tool_id ?? '', name: ev.tool_name || 'tool', input: ev.tool_input, done: false, error: false })
     return
   }
@@ -900,12 +906,18 @@ export function foldTrailStep(steps: AgentTrailStep[], kind: string, ev: SubAgen
         return
       }
     }
+    // A replayed completion of a step that is already done: refresh it in place.
+    const doneAt = id ? steps.findIndex(st => st.kind === 'tool' && st.id === id) : -1
+    if (doneAt >= 0) {
+      steps[doneAt] = { ...(steps[doneAt] as Extract<AgentTrailStep, { kind: 'tool' }>), output: ev.tool_output, done: true, error: isErr }
+      return
+    }
     // Unmatched completion (e.g. replay after the "tool" event aged out of the
     // retention buffer) — append it so the output still shows.
     steps.push({ kind: 'tool', id, name: ev.tool_name || 'tool', output: ev.tool_output, done: true, error: isErr })
     return
   }
-  if (kind === 'text' && ev.text) {
+  if (kind === 'text' && ev.text && !steps.some(st => st.kind === 'text' && st.text === ev.text)) {
     steps.push({ kind: 'text', text: ev.text })
   }
 }
@@ -1067,7 +1079,11 @@ export function recordWorkflowTrailEvent(sessionId: string, ev: WorkflowEventPay
       ? { ...prev, logs: [...prev.logs], agents: [...prev.agents] }
       : { id: runId, description: ev.description || runId, status: 'running', logs: [], agents: [] }
     if (ev.description && (r.description === r.id || !r.description)) r.description = ev.description
-    if (kind === 'progress') {
+    if (kind === 'started') {
+      // A replay resends started and then the run's whole log; start the log
+      // over so it isn't appended twice.
+      r.logs = []
+    } else if (kind === 'progress') {
       if (ev.line) {
         r.logs.push(ev.line)
         if (r.logs.length > maxWorkflowProgressLines) r.logs = r.logs.slice(r.logs.length - maxWorkflowProgressLines)
