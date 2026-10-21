@@ -6,7 +6,7 @@
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
   import { get } from 'svelte/store'
-  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, sessions, clearMsgs, artifacts, showToast } from '../lib/stores'
+  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, chatContextUsage, sessions, clearMsgs, artifacts, showToast } from '../lib/stores'
   import * as api from '../lib/api'
   import type { Attachment } from '../lib/composerDrafts'
   import { ws } from '../lib/ws'
@@ -16,6 +16,7 @@
   import ArtifactsSheet from './ArtifactsSheet.svelte'
   import EditMessageSheet from './EditMessageSheet.svelte'
   import { longpress } from './longpress'
+  import SessionSettings from './SessionSettings.svelte'
   import AuthedImage from './AuthedImage.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import AttachmentStrip from './AttachmentStrip.svelte'
@@ -37,7 +38,7 @@
 
   const sid = $derived($activeSessionId ?? '')
   let showArtifacts = $state(false)
-
+  let showSettings = $state(false)
   const msgs = $derived($chatMessages[sid] ?? [])
   const steers = $derived($mobileSteers[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
@@ -46,6 +47,8 @@
   // A confirmation raised for THIS session while it's open — surface an inline
   // entry to the approval detail (the feed card is out of view here).
   const pendingApproval = $derived(session?.pending_confirmation ?? false)
+  // How full the context is, as the desktop composer's chip shows it.
+  const ctxUsage = $derived(Number($chatContextUsage[sid] ?? session?.context_usage ?? 0))
 
   // Editing a sent message (long press on its bubble). The target is captured
   // when the sheet opens: a re-render can put another bubble at the same list
@@ -192,13 +195,14 @@
   <button class="back" onclick={onBack} aria-label={$t('m.back')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-text)" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
   </button>
-  <div class="dtitle">
+  <button class="dtitle" onclick={() => (showSettings = true)} aria-haspopup="dialog">
     <span class="t">{title}</span>
     <span class="sub">
       <span class="d" class:live={streaming}></span>
-      {streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}
+      <span class="sub-text">{streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}{` · ${ctxUsage}%`}</span>
+      <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
     </span>
-  </div>
+  </button>
   {#if $artifacts.length}
     <button class="arts" onclick={() => (showArtifacts = true)} aria-label={$t('m.artifacts')}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
@@ -209,6 +213,10 @@
 
 {#if editTarget}
   <EditMessageSheet content={editTarget.content} onSave={saveEdit} onClose={() => (editTarget = null)} />
+{/if}
+
+{#if showSettings && sid}
+  <SessionSettings sessionId={sid} onClose={() => (showSettings = false)} />
 {/if}
 
 {#if showArtifacts}
@@ -341,7 +349,7 @@
     cursor: pointer;
     box-shadow: var(--m-shadow-card);
   }
-  .dtitle { flex: 1; min-width: 0; }
+  .dtitle { flex: 1; min-width: 0; padding: 0; border: none; background: none; font: inherit; text-align: left; cursor: pointer; }
   .dtitle .t {
     display: block;
     font-size: 15px;
@@ -376,7 +384,9 @@
     font-size: 11px;
     color: var(--m-text-3);
   }
-  .sub .d { width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
+  .sub .sub-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub .chev { flex: none; }
+  .sub .d { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
   .sub .d.live { background: var(--m-success); }
   .scroll {
     flex: 1;
