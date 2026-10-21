@@ -472,11 +472,12 @@ func replyFromResponse(resp provider.Response) agent.Reply {
 
 // TestConnection pings the provider with a minimal request to verify that
 // the API key, base URL, and model all work. It returns a descriptive error
-// on failure (auth, model not found, network, etc.).
-func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model, protocol string) error {
+// on failure (auth, model not found, network, etc.). headers are the
+// endpoint's extra request headers, as real requests send them.
+func TestConnection(ctx context.Context, providerName, apiKey, baseURL, model, protocol string, headers map[string]string) error {
 	// No limiter: this is a single user-initiated ping, and making it queue
 	// behind a busy endpoint's window would look like a hung "Test" button.
-	p, err := buildClient(providerName, apiKey, baseURL, protocol, nil, nil)
+	p, err := buildClient(providerName, apiKey, baseURL, protocol, headers, nil)
 	if err != nil {
 		return err
 	}

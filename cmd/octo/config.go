@@ -832,7 +832,7 @@ func reportConnectionCheck(stdout, stderr io.Writer, provider, key, baseURL, mod
 	fmt.Fprintln(stdout, "Testing connection…")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := validateConnection(ctx, provider, key, baseURL, model, protocol); err != nil {
+	if err := validateConnection(ctx, provider, key, baseURL, model, protocol, nil); err != nil {
 		fmt.Fprintf(stderr, "✗ Couldn't connect: %v\n", err)
 		return classifyConnErr(err)
 	}
