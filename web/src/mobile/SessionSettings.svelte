@@ -3,7 +3,8 @@
   // the chat header. Each pick applies at once, like the desktop composer's
   // menus; the next turn runs with it.
   import { get } from 'svelte/store'
-  import { sessions, chatPermMode, globalPermissionMode, showToast } from '../lib/stores'
+  import { sessions, chatPermMode, chatContextUsage, chatProgress, chatStreaming, globalPermissionMode, showToast } from '../lib/stores'
+  import { sendMobile } from './chatWiring'
   import * as api from '../lib/api'
   import { t, tr } from '../lib/i18n'
   import { loadModelOptions, normalizePermMode, PERM_MODES, type ModelOption } from './sessionOptions'
@@ -28,6 +29,18 @@
   const permNote = $derived(PERM_MODES.find(p => p.m === permMode)?.note ?? 'm.perm_note_ask')
 
   let busy = $state(false)
+
+  const ctxUsage = $derived(Number($chatContextUsage[sessionId] ?? session?.context_usage ?? 0))
+  const running = $derived($chatStreaming[sessionId] ?? false)
+
+  // /compact runs server-side with no progress events of its own; label the
+  // status line until the session_update idle that ends it clears it.
+  function compact() {
+    if (running) return
+    sendMobile(sessionId, '/compact')
+    chatProgress.update(p => ({ ...p, [sessionId]: { message: tr('m.compacting'), phase: 'active' } }))
+    onClose()
+  }
 
   async function pickModel(id: string) {
     if (busy || id === modelId) return
@@ -65,6 +78,13 @@
 
 <div class="backdrop" role="presentation" onclick={onClose}></div>
 <div class="sheet" role="dialog" aria-modal="true" aria-label={session?.title || session?.name || $t('m.session')}>
+  <p class="lbl">{$t('chat.context')}</p>
+  <div class="ctx">
+    <span class="ctx-bar"><span style="width:{Math.min(100, ctxUsage)}%" class:hot={ctxUsage >= 75}></span></span>
+    <span class="ctx-pct">{ctxUsage}%</span>
+    <button class="ctx-btn" onclick={compact} disabled={running}>{$t('chat.compact')}</button>
+  </div>
+
   <p class="lbl">{$t('m.model')}</p>
   <select class="select" value={modelId} disabled={busy} aria-label={$t('m.model')} onchange={(e) => pickModel((e.currentTarget as HTMLSelectElement).value)}>
     <option value="">{$t('m.default')}</option>
@@ -126,4 +146,20 @@
   }
   .segi.on { background: var(--m-accent); color: #fff; font-weight: 600; }
   .note { margin: 10px 2px 0; font-size: 12px; color: var(--m-text-3); }
+  .ctx { display: flex; align-items: center; gap: 10px; }
+  .ctx-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--m-border-2); overflow: hidden; }
+  .ctx-bar span { display: block; height: 100%; background: var(--m-accent); }
+  .ctx-bar span.hot { background: var(--m-warning); }
+  .ctx-pct { font-size: 13px; color: var(--m-text-2); font-variant-numeric: tabular-nums; }
+  .ctx-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--m-border);
+    border-radius: 9999px;
+    background: var(--m-surface);
+    color: var(--m-text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .ctx-btn:disabled { opacity: .4; cursor: default; }
 </style>

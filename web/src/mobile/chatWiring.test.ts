@@ -12,7 +12,7 @@ vi.mock('../lib/ws', () => ({
   },
 }))
 
-import { chatMessages, chatPermMode, chatStreaming, toasts } from '../lib/stores'
+import { chatContextUsage, chatMessages, chatPermMode, chatStreaming, toasts } from '../lib/stores'
 import { echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
 
 describe('echoRefs', () => {
@@ -99,6 +99,24 @@ describe('sending while a turn runs', () => {
     handlers.session_update({ session_id: sid, permission_mode: 'strict' })
     handlers.session_update({ session_id: sid, status: 'running' })
     expect(get(chatPermMode)[sid]).toBe('strict')
+  })
+
+  it('tracks context usage from session_update', () => {
+    chatContextUsage.set({})
+    handlers.session_update({ session_id: sid, context_usage: 63 })
+    handlers.session_update({ session_id: sid, status: 'running' })
+    expect(get(chatContextUsage)[sid]).toBe(63)
+  })
+
+  it('shifts message indices after a mid-turn compaction', () => {
+    chatMessages.update(m => ({ ...m, [sid]: [
+      { id: 'u0', type: 'user', content: 'old', messageIndex: 0 },
+      { id: 'u5', type: 'user', content: 'recent', messageIndex: 5 },
+    ] as any }))
+    handlers.history_reindex({ session_id: sid, folded_msgs: 3 })
+    const msgs = get(chatMessages)[sid] as any[]
+    expect(msgs[0].messageIndex).toBeUndefined()
+    expect(msgs[1].messageIndex).toBe(3)
   })
 
   it('still echoes a send made while idle as a pending bubble', () => {

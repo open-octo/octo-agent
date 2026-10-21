@@ -21,6 +21,7 @@ import { inlineSlashCommand } from '../lib/inlineSlash'
 import type { Attachment } from '../lib/composerDrafts'
 import { appendLiveAfterHistory, isReplayedUserEcho } from '../lib/userEchoDedup'
 import { observeArtifact, resetArtifacts } from '../lib/artifacts'
+import { shiftMessageIndices } from '../lib/reindex'
 import {
   chatMessages,
   chatStreaming,
@@ -28,6 +29,7 @@ import {
   chatProgress,
   chatTodos,
   chatPermMode,
+  chatContextUsage,
   chatLastTextAt,
   chatGoal,
   addChatMsg,
@@ -367,12 +369,23 @@ export function wireMobileSession(sid: string): () => void {
     if (typeof ev.permission_mode === 'string' && ev.permission_mode) {
       chatPermMode.update(m => ({ ...m, [sid]: ev.permission_mode }))
     }
+    if (typeof ev.context_usage === 'number') {
+      chatContextUsage.update(u => ({ ...u, [sid]: ev.context_usage }))
+    }
     // Mobile only needs the idle snapshot to clear a stale streaming indicator.
     if (ev.status === 'idle') {
       chatStreaming.update(s => ({ ...s, [sid]: false }))
       chatProgress.update(p => ({ ...p, [sid]: null }))
       chatThinking.update(t => ({ ...t, [sid]: '' }))
     }
+  }))
+
+  // A mid-turn compaction moved every persisted index on disk; shift the ones
+  // the bubbles carry so editing a message still targets the right one.
+  cleanups.push(ws.on('history_reindex', (ev: any) => {
+    if (!forSid(ev)) return
+    const folded = Number(ev.folded_msgs) || 0
+    chatMessages.update(m => (m[sid] ? { ...m, [sid]: shiftMessageIndices(m[sid], folded) } : m))
   }))
 
   cleanups.push(ws.on('history_reload', (ev: any) => {
