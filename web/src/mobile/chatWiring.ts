@@ -133,8 +133,7 @@ export function sendMobile(sid: string, text: string, files?: Attachment[]) {
   // reach here. /compact keeps the optimistic busy flag: it is a long
   // server-side job that closes with its own session_update idle, which the
   // handler below already listens for. What the others report is the server's
-  // own doing (a history_reload, a toast); goal notices have no mobile surface
-  // yet, which is a separate gap, not something a spinner should paper over.
+  // own doing (a history_reload, a toast, a goal notice).
   const inline = inlineSlashCommand(t, !!(files && files.length))
   if (inline) {
     if (inline === 'compact') chatStreaming.update(s => ({ ...s, [sid]: true }))
@@ -275,6 +274,31 @@ export function wireMobileSession(sid: string): () => void {
     if (!forSid(ev)) return
     chatProgress.update(p => ({ ...p, [sid]: { message: ev.message || 'Thinking', phase: ev.phase } }))
     if (ev.phase === 'active') chatStreaming.update(s => ({ ...s, [sid]: true }))
+  }))
+
+  // The goal bar's snapshot. Carries its own session id: a goal can change in a
+  // session other than the one this handler set is wired for, and keeping it
+  // current means the bar is right when that session opens.
+  cleanups.push(ws.on('goal_updated', (ev: any) => {
+    if (!ev.session_id) return
+    chatGoal.update(m => ({ ...m, [ev.session_id]: ev.goal ?? null }))
+  }))
+
+  // The goal's scrollback lines, as on desktop: the /goal reply, a status
+  // change, and the start of a continuation turn — whose prompt is hidden
+  // server-side, so without this line the turn would look unprompted.
+  cleanups.push(ws.on('goal_notice', (ev: any) => {
+    if (ev.session_id !== sid) return
+    const fixed: Record<string, string> = {
+      start: 'Goal starts — /goal pause to stop',
+      continue: 'Goal continues — /goal pause to stop',
+    }
+    const text = ev.text || fixed[ev.kind ?? '']
+    if (!text) return
+    addChatMsg(sid, {
+      id: uid('note'), type: 'notice', content: text, level: ev.level ?? 'info',
+      createdAt: Date.now(), streaming: false, tools: [], todos: [],
+    })
   }))
 
   // The session plan (task_create / task_update). Replayed on subscribe, so a

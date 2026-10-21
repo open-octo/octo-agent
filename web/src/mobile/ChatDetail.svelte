@@ -6,7 +6,8 @@
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
   import { get } from 'svelte/store'
-  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, sessions, clearMsgs, artifacts } from '../lib/stores'
+  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, chatGoal, sessions, clearMsgs, artifacts } from '../lib/stores'
+  import { goalChip } from '../lib/goalChip'
   import type { Attachment } from '../lib/composerDrafts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile, mobileSteers } from './chatWiring'
@@ -50,6 +51,12 @@
   // The session plan, as the desktop's plan card shows it: a summary with a
   // progress bar, steps on tap. Dropped 3s after every step completes (the
   // server doesn't replay a finished plan, so it won't come back on reopen).
+  // The session goal (loaded with the history, kept live by goal_updated):
+  // objective and status on one line, the whole objective on tap.
+  const goal = $derived($chatGoal[sid] ?? null)
+  const goalStatus = $derived(goalChip(goal))
+  let goalOpen = $state(false)
+
   const todos = $derived($chatTodos[sid] ?? [])
   const planDone = $derived(todos.filter((s: any) => s.status === 'completed').length)
   let planOpen = $state(false)
@@ -181,6 +188,14 @@
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--m-warning)" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
     <span class="txt">{$t('m.approval_banner')}</span>
     <span class="go">{$t('m.view')} ›</span>
+  </button>
+{/if}
+
+{#if goal}
+  <button class="goal" class:open={goalOpen} onclick={() => (goalOpen = !goalOpen)} aria-expanded={goalOpen}>
+    <span class="goal-label">{$t('chat.goal')}</span>
+    <span class="goal-text">{goal.objective}</span>
+    <span class="goal-status" class:active={goal.status === 'active'}>{goalStatus}</span>
   </button>
 {/if}
 
@@ -396,7 +411,29 @@
     font-size: 12px;
     color: var(--m-text-3);
     text-align: center;
+    white-space: pre-line;
   }
+  .goal {
+    flex: none;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 12px 8px;
+    padding: 9px 14px;
+    background: var(--m-surface);
+    border: 1px solid var(--m-border-2);
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--m-text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .goal-label { flex: none; font-weight: 600; }
+  .goal-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--m-text-2); }
+  .goal.open .goal-text { white-space: pre-wrap; word-break: break-word; }
+  .goal-status { flex: none; font-size: 12px; color: var(--m-text-3); font-variant-numeric: tabular-nums; }
+  .goal-status.active { color: var(--m-accent); }
   .notice.err { color: var(--m-error); }
   .steer {
     align-self: flex-end;

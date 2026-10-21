@@ -12,7 +12,7 @@ vi.mock('../lib/ws', () => ({
   },
 }))
 
-import { chatMessages, chatStreaming, toasts } from '../lib/stores'
+import { chatGoal, chatMessages, chatStreaming, toasts } from '../lib/stores'
 import { echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
 
 describe('echoRefs', () => {
@@ -92,6 +92,15 @@ describe('sending while a turn runs', () => {
     sendMobile(sid, 'late')
     handlers.complete({ session_id: sid })
     expect(get(mobileSteers)[sid]).toEqual([])
+  })
+
+  it('keeps the goal snapshot current and adds goal notices to the transcript', () => {
+    chatGoal.set({})
+    handlers.goal_updated({ session_id: sid, goal: { objective: 'ship it', status: 'active' } })
+    expect(get(chatGoal)[sid]).toMatchObject({ objective: 'ship it' })
+    handlers.goal_notice({ session_id: sid, kind: 'continue' })
+    handlers.goal_notice({ session_id: 'other', kind: 'continue' })
+    expect(ids().filter(x => x.startsWith('notice:'))).toEqual(['notice:Goal continues — /goal pause to stop'])
   })
 
   it('still echoes a send made while idle as a pending bubble', () => {

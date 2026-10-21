@@ -15,6 +15,7 @@
   import { composeSlashCommand } from '../../lib/slashCompose'
   import { parkDraft, takeDraft, patchParkedAttachments, type Attachment } from '../../lib/composerDrafts'
   import { compressImage } from '../../lib/imageCompress'
+  import { goalChip as goalChipText } from '../../lib/goalChip'
   import FolderPickerModal from '../overlays/FolderPickerModal.svelte'
   import ProjectModal from '../overlays/ProjectModal.svelte'
   import type { McpServerDetail, McpTool, SessionGroup } from '../../lib/types'
@@ -662,19 +663,7 @@
   // Session goal chip: usage while active, status label otherwise. null/absent
   // hides the chip entirely.
   let goal = $derived($chatGoal[sid] ?? null)
-  let goalChip = $derived.by(() => {
-    if (!goal) return ''
-    const compact = (n: number) =>
-      n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
-      : n >= 1_000 ? `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
-      : `${n}`
-    if (goal.status === 'active') {
-      if (goal.token_budget > 0) return `${compact(goal.tokens_used ?? 0)}/${compact(goal.token_budget)}`
-      const s = goal.time_used_seconds ?? 0
-      return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
-    }
-    return String(goal.status ?? '').replace('_', ' ')
-  })
+  let goalChip = $derived(goalChipText(goal))
 
   function cap(s: string): string {
     return s ? s[0].toUpperCase() + s.slice(1) : s
