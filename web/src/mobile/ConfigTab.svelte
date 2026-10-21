@@ -155,25 +155,29 @@
     return `${(n / 1024 / 1024).toFixed(1)} MB`
   }
 
-  // The app being viewed. Its page loads from a token URL the server grants:
-  // the app's frame carries no access-key cookie (pageURL.ts).
   // ── memories: read on tap, forget, or hand to the assistant ───────────────
   let openMem = $state<string | null>(null)
-  let memBody = $state<Record<string, string>>({})
+  // null while loading; a failed read is dropped so reopening retries.
+  let memBody = $state<Record<string, string | null>>({})
   async function toggleMem(m: Memory) {
     const key = m.source + m.name
     openMem = openMem === key ? null : key
     if (openMem !== key || memBody[key] !== undefined) return
-    memBody = { ...memBody, [key]: '' }
+    memBody = { ...memBody, [key]: null }
     try {
       const d = await api.getMemory(m.name, m.source)
       memBody = { ...memBody, [key]: d.content ?? '' }
     } catch {
-      memBody = { ...memBody, [key]: tr('m.load_failed') }
+      const { [key]: _, ...rest } = memBody
+      memBody = rest
+      if (openMem === key) openMem = null
+      showToast(tr('m.load_failed'), 'error')
     }
   }
   // One pending confirmation at a time across both lists, keyed by row.
   let confirming = $state<string | null>(null)
+  // The row whose request is in flight; every row's destructive actions wait
+  // for it, so a second delete can't re-enable the first one's buttons.
   let busyRow = $state<string | null>(null)
   async function forgetMem(m: Memory) {
     const key = m.source + m.name
@@ -241,6 +245,8 @@
     }
   }
 
+  // The app being viewed. Its page loads from a token URL the server grants:
+  // the app's frame carries no access-key cookie (pageURL.ts).
   let viewing = $state<{ slug: string; name: string; src: string; failed: boolean } | null>(null)
   async function openApp(app: api.LightApp) {
     viewing = { slug: app.slug, name: app.name || app.slug, src: '', failed: false }
@@ -383,7 +389,7 @@
             </button>
             {#if openMem === key}
               <div class="detail">
-                {#if memBody[key]}<div class="md">{@html renderMarkdown(memBody[key])}</div>{:else}<div class="sub">{$t('m.loading')}</div>{/if}
+                {#if memBody[key] == null}<div class="sub">{$t('m.loading')}</div>{:else}<div class="md">{@html renderMarkdown(memBody[key] ?? "")}</div>{/if}
                 {#if confirming === `forget:${key}`}
                   <p class="ask">{$t('profile.confirm_forget').replace('{name}', m.name)}</p>
                   <div class="acts">
@@ -392,7 +398,7 @@
                   </div>
                 {:else}
                   <div class="acts">
-                    <button class="pill danger" disabled={busyRow === key} onclick={() => (confirming = `forget:${key}`)}>{$t('profile.forget')}</button>
+                    <button class="pill danger" disabled={busyRow !== null} onclick={() => (confirming = `forget:${key}`)}>{$t('profile.forget')}</button>
                   </div>
                 {/if}
               </div>
@@ -429,8 +435,8 @@
                 </div>
               {:else}
                 <div class="acts">
-                  <button class="pill danger" disabled={busyRow === f.id} onclick={() => (confirming = `delete:${f.id}`)}>{$t('files.delete_perm')}</button>
-                  <button class="pill strong" disabled={busyRow === f.id} onclick={() => restore(f)}>{$t('files.restore')}</button>
+                  <button class="pill danger" disabled={busyRow !== null} onclick={() => (confirming = `delete:${f.id}`)}>{$t('files.delete_perm')}</button>
+                  <button class="pill strong" disabled={busyRow !== null} onclick={() => restore(f)}>{$t('files.restore')}</button>
                 </div>
               {/if}
             </div>
