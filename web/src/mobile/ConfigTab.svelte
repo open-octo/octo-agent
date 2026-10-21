@@ -382,7 +382,7 @@
       profileBody = { ...profileBody, [doc]: d.content ?? '' }
     } catch {
       profileBody = { ...profileBody, [doc]: undefined }
-      openRow = null
+      if (openRow === key) openRow = null
       showToast(tr('m.load_failed'), 'error')
     }
   }
@@ -564,10 +564,11 @@
                     {#if a.source === 'default'}
                       <button class="pill" disabled={busyRow === key} onclick={() => toggleAgent(a)}>{a.enabled === false ? $t('agents.show') : $t('agents.hide')}</button>
                     {:else}
-                      <button class="pill danger" disabled={busyRow === key} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
+                      <button class="pill danger" disabled={busyRow !== null} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
                       <button class="pill" disabled={opening} onclick={() => editAgent(a)}>{$t('agents.edit_with_agent')}</button>
                     {/if}
-                    <button class="pill strong" disabled={opening} onclick={() => summon(a)}>{$t('agents.summon').replace('{name}', agentName(a))}</button>
+                    <!-- A hidden curated expert is "not found" to session creation until shown again. -->
+                    <button class="pill strong" disabled={opening || a.enabled === false} onclick={() => summon(a)}>{$t('agents.summon').replace('{name}', agentName(a))}</button>
                   </div>
                 {/if}
               </div>
