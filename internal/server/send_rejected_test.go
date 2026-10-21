@@ -520,3 +520,68 @@ drain:
 		t.Fatal("expected send_rejected event when force takeover races an active lease")
 	}
 }
+
+// TestHandleWSUserMessage_AllAttachmentsDroppedEmitsSendRejected: a message
+// with no text whose every attachment is dropped (here an SVG, which
+// NewImageBlock refuses) must be rejected by name — otherwise the client's
+// optimistic bubble waits forever for an echo that never comes. An empty
+// message with no files at all stays a silent no-op.
+func TestHandleWSUserMessage_AllAttachmentsDroppedEmitsSendRejected(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+	srv.turnRunning = make(map[string]bool)
+	srv.steerQueues = make(map[string][]queuedTurn)
+	srv.sessionAgents = make(map[string]*agent.Agent)
+
+	sess := agent.NewSession("stub-model", "")
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	conn := &wsConn{
+		hub:        srv.wsHub,
+		send:       make(chan []byte, 256),
+		subscribed: map[string]struct{}{},
+	}
+	srv.wsHub.register <- conn
+	srv.wsHub.subscribe(conn, sess.ID)
+
+	srv.handleWSUserMessage(conn, &wsMsgUserMessage{
+		SessionID: sess.ID,
+		Content:   json.RawMessage(`""`),
+	})
+	srv.handleWSUserMessage(conn, &wsMsgUserMessage{
+		SessionID: sess.ID,
+		Content:   json.RawMessage(`""`),
+		Files:     []wsUserFile{{Name: "logo.svg", MimeType: "image/svg+xml", DataURL: "data:image/svg+xml;base64,PHN2Zy8+"}},
+	})
+
+	var rejections []string
+	deadline := time.After(2 * time.Second)
+drain:
+	for {
+		select {
+		case b := <-conn.send:
+			var ev map[string]any
+			if err := json.Unmarshal(b, &ev); err != nil {
+				continue
+			}
+			if typ, _ := ev["type"].(string); typ == "send_rejected" {
+				msg, _ := ev["message"].(string)
+				rejections = append(rejections, msg)
+			}
+		case <-deadline:
+			break drain
+		}
+	}
+	if len(rejections) != 1 {
+		t.Fatalf("send_rejected events = %q, want exactly one (for the dropped attachment)", rejections)
+	}
+	if !strings.Contains(rejections[0], "logo.svg") {
+		t.Errorf("send_rejected message = %q, want it to name logo.svg", rejections[0])
+	}
+}

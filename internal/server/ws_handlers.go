@@ -521,6 +521,16 @@ func (s *Server) handleWSUserMessage(conn *wsConn, msg *wsMsgUserMessage) {
 
 	att := parseUserFiles(msg.Files, loopback, sendImageBlocks)
 	if content == "" && len(att.blocks) == 0 && len(att.notes) == 0 {
+		// An attachments-only message whose every file was dropped: say so,
+		// or the client's optimistic bubble waits forever for an echo that
+		// never comes.
+		if len(att.failed) > 0 {
+			s.wsHub.broadcast(sid, map[string]any{
+				"type":       "send_rejected",
+				"session_id": sid,
+				"message":    "Could not attach " + strings.Join(att.failed, ", ") + " (unsupported image format or unreadable file)",
+			})
+		}
 		return
 	}
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -92,6 +93,10 @@ type userAttachments struct {
 	// on-disk path of each document attachment (read_file can open them). They
 	// are also what document attachment chips are rendered from.
 	notes []string
+	// failed names the attachments that were skipped (unreadable, missing on
+	// disk, or an image format the model can't take), so a message that ends
+	// up empty can tell the user which file it dropped.
+	failed []string
 }
 
 // ensureUploadsDir returns ~/.octo/uploads, creating it if needed.
@@ -107,8 +112,8 @@ func ensureUploadsDir() (string, error) {
 }
 
 // parseUserFiles converts a WS files payload into model blocks, display refs,
-// and document path notes. Per-file failures are logged and skipped so one bad
-// attachment doesn't drop the rest of the message. When sendImageBlocks is
+// and document path notes. Per-file failures are logged, recorded in failed,
+// and skipped so one bad attachment doesn't drop the rest of the message. When sendImageBlocks is
 // false, image data URLs are persisted to disk and referenced by path (so the
 // model can read them with read_file) instead of being sent as image blocks.
 //
@@ -130,6 +135,7 @@ func parseUserFiles(files []wsUserFile, allowLocalPath, sendImageBlocks bool) us
 			}
 			if _, err := os.Stat(abs); err != nil {
 				log.Printf("[ws] native file attachment %q: %v", f.Name, err)
+				att.failed = append(att.failed, cmp.Or(f.Name, "attachment"))
 				continue
 			}
 			att.notes = append(att.notes, agent.AttachmentNote(abs))
@@ -137,6 +143,7 @@ func parseUserFiles(files []wsUserFile, allowLocalPath, sendImageBlocks bool) us
 			block, url, err := saveImageAttachment(f.Name, f.DataURL)
 			if err != nil {
 				log.Printf("[ws] image attachment %q: %v", f.Name, err)
+				att.failed = append(att.failed, cmp.Or(f.Name, "attachment"))
 				continue
 			}
 			if sendImageBlocks {
@@ -157,6 +164,7 @@ func parseUserFiles(files []wsUserFile, allowLocalPath, sendImageBlocks bool) us
 			dir, err := ensureUploadsDir()
 			if err != nil {
 				log.Printf("[ws] file attachment %q: %v", f.Name, err)
+				att.failed = append(att.failed, cmp.Or(f.Name, "attachment"))
 				continue
 			}
 			// The composer sends back the /api/uploads/<name> URL that
@@ -164,6 +172,7 @@ func parseUserFiles(files []wsUserFile, allowLocalPath, sendImageBlocks bool) us
 			abs := filepath.Join(dir, filepath.Base(f.Path))
 			if _, err := os.Stat(abs); err != nil {
 				log.Printf("[ws] file attachment %q: %v", f.Name, err)
+				att.failed = append(att.failed, cmp.Or(f.Name, "attachment"))
 				continue
 			}
 			att.notes = append(att.notes, agent.AttachmentNote(abs))
