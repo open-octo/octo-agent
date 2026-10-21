@@ -6,13 +6,16 @@
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
   import { get } from 'svelte/store'
-  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, sessions, clearMsgs, artifacts } from '../lib/stores'
+  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, sessions, clearMsgs, artifacts, showToast } from '../lib/stores'
+  import * as api from '../lib/api'
   import type { Attachment } from '../lib/composerDrafts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile, mobileSteers } from './chatWiring'
   import { renderMarkdown } from '../lib/markdown'
   import { t } from '../lib/i18n'
   import ArtifactsSheet from './ArtifactsSheet.svelte'
+  import EditMessageSheet from './EditMessageSheet.svelte'
+  import { longpress } from './longpress'
   import AuthedImage from './AuthedImage.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import AttachmentStrip from './AttachmentStrip.svelte'
@@ -34,6 +37,7 @@
 
   const sid = $derived($activeSessionId ?? '')
   let showArtifacts = $state(false)
+
   const msgs = $derived($chatMessages[sid] ?? [])
   const steers = $derived($mobileSteers[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
@@ -42,6 +46,37 @@
   // A confirmation raised for THIS session while it's open — surface an inline
   // entry to the approval detail (the feed card is out of view here).
   const pendingApproval = $derived(session?.pending_confirmation ?? false)
+
+  // Editing a sent message (long press on its bubble). The target is captured
+  // when the sheet opens: a re-render can put another bubble at the same list
+  // position, and the server checks index + original text before cutting.
+  let editTarget = $state<{ messageIndex: number; content: string } | null>(null)
+  // The desktop's rule: a bubble needs its persisted position; mid-turn only
+  // the turn in flight qualifies (the server interrupts and reruns it) — an
+  // older one would cut finished turns, so it waits until the reply stops.
+  const lastClosedReply = $derived(msgs.findLastIndex((x: any) => x.type === 'assistant' && typeof x.messageIndex === 'number'))
+  function canEdit(i: number): boolean {
+    const m = msgs[i]
+    if (m?.type !== 'user' || typeof m.messageIndex !== 'number' || m.pending) return false
+    return !streaming || i > lastClosedReply
+  }
+  function startEdit(i: number) {
+    if (!canEdit(i)) return
+    editTarget = { messageIndex: msgs[i].messageIndex, content: msgs[i].content }
+  }
+  // The server truncates and reruns by itself (no resend from here) and
+  // broadcasts history_rollback, which reloads the transcript.
+  async function saveEdit(text: string): Promise<boolean> {
+    const target = editTarget
+    if (!target || !sid) return false
+    try {
+      await api.editMessage(sid, target.messageIndex, text, target.content)
+      return true
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+      return false
+    }
+  }
 
   function stop() {
     if (sid) ws.interrupt(sid)
@@ -172,6 +207,10 @@
   {/if}
 </header>
 
+{#if editTarget}
+  <EditMessageSheet content={editTarget.content} onSave={saveEdit} onClose={() => (editTarget = null)} />
+{/if}
+
 {#if showArtifacts}
   <ArtifactsSheet onClose={() => (showArtifacts = false)} />
 {/if}
@@ -203,7 +242,7 @@
 {/if}
 
 <div class="scroll" bind:this={scroller}>
-  {#each msgs as msg (msg.id)}
+  {#each msgs as msg, i (msg.id)}
     {#if msg.type === 'user'}
       {#if msg.images?.length}
         <div class="atts sent" class:pending={msg.pending}>
@@ -217,7 +256,7 @@
         </div>
       {/if}
       {#if msg.content}
-        <div class="bubble user" class:pending={msg.pending}>{msg.content}</div>
+        <div class="bubble user" class:pending={msg.pending} class:editable={canEdit(i)} use:longpress={() => startEdit(i)}>{msg.content}</div>
       {/if}
     {:else if msg.type === 'assistant'}
       <div class="bubble agent">
@@ -364,6 +403,8 @@
     border-radius: 14px 4px 14px 14px;
   }
   .bubble.user.pending { opacity: .6; }
+  /* Long press edits: keep iOS from selecting text or raising its callout. */
+  .bubble.user.editable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .bubble.agent {
     align-self: flex-start;
     background: var(--m-surface);
