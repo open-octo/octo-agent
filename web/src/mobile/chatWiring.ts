@@ -13,7 +13,7 @@
 // desktop ToolGroup, so the tool fields set here feed the same cards. Artifacts are
 // observed into the shared store, as on desktop, and the session's artifacts
 // sheet (ArtifactsSheet) renders them.
-import { get } from 'svelte/store'
+import { get, writable } from 'svelte/store'
 import { ws } from '../lib/ws'
 import { tr } from '../lib/i18n'
 import * as api from '../lib/api'
@@ -104,6 +104,24 @@ export function loadMobileHistory(sid: string): Promise<void> {
   }).catch(() => {})
 }
 
+// Messages sent while a turn runs. The server folds them into that turn (or
+// chains them after it) and only echoes them as history_user_message once the
+// turn picks them up — so until then they stay out of the transcript, where a
+// bubble would split the reply still being written, and show as pending
+// below it instead (the desktop's pendingSteers, without retract/queue).
+export type MobileSteer = { id: string; content: string; images: string[] }
+export const mobileSteers = writable<Record<string, MobileSteer[]>>({})
+
+// Where a confirmed steer enters the transcript: before the reply still
+// streaming, so it reads as steer → the reply that follows it (as on desktop).
+export function insertConfirmedSteer<T extends { type: string; streaming?: boolean }>(msgs: T[], confirmed: T): T[] {
+  const out = [...msgs]
+  const at = out.findLastIndex(x => x.type === 'assistant' && x.streaming)
+  if (at >= 0) out.splice(at, 0, confirmed)
+  else out.push(confirmed)
+  return out
+}
+
 // Optimistically echo the user's message, mark the turn streaming, and send.
 // history_user_message reconciles the echo (see the handler below).
 export function sendMobile(sid: string, text: string, files?: Attachment[]) {
@@ -120,6 +138,11 @@ export function sendMobile(sid: string, text: string, files?: Attachment[]) {
   const inline = inlineSlashCommand(t, !!(files && files.length))
   if (inline) {
     if (inline === 'compact') chatStreaming.update(s => ({ ...s, [sid]: true }))
+    ws.sendMessage(sid, t, files)
+    return
+  }
+  if (get(chatStreaming)[sid]) {
+    mobileSteers.update(m => ({ ...m, [sid]: [...(m[sid] ?? []), { id: uid('s'), content: t, images: echoRefs(files) }] }))
     ws.sendMessage(sid, t, files)
     return
   }
@@ -181,10 +204,23 @@ export function wireMobileSession(sid: string): () => void {
     const content = ev.content ?? ''
     const createdAt = ev.created_at ?? Date.now()
     const images = ev.images ?? []
+    // A steer the turn just picked up: retire its pending line and place it
+    // ahead of the streaming reply. A replayed echo (mid-turn resubscribe) of
+    // one already placed matches no pending steer and falls through.
+    const steers = get(mobileSteers)[sid] ?? []
+    const si = steers.findIndex(s => s.content === content)
+    if (si >= 0 && !isReplayedUserEcho(get(chatMessages)[sid] ?? [], content, createdAt)) {
+      mobileSteers.update(m => ({ ...m, [sid]: steers.filter((_, i) => i !== si) }))
+      chatMessages.update(m => ({
+        ...m,
+        [sid]: insertConfirmedSteer(m[sid] || [], { id: uid('u'), type: 'user', content, createdAt, streaming: false, pending: false, tools: [], todos: [], images, messageIndex: ev.message_index }),
+      }))
+      return
+    }
     chatMessages.update(m => {
       const msgs = [...(m[sid] || [])]
       // Reconcile the optimistic echo: replace the trailing pending user bubble
-      // of the same text, else append. (Mobile has no steer path.)
+      // of the same text, else append.
       const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
       if (lastPending >= 0 && msgs[lastPending].content === content) {
         msgs[lastPending] = { ...msgs[lastPending], id: uid('u'), createdAt, pending: false, images, messageIndex: ev.message_index }
@@ -285,6 +321,14 @@ export function wireMobileSession(sid: string): () => void {
   // clear streaming, and surface why. (No steer/force bookkeeping — mobile has
   // no optimistic-steer path; force-takeover UI is a later batch.)
   const rollbackSend = (ev: any) => {
+    // A rejection is synchronous, so it belongs to the latest send: mid-turn
+    // that was a steer — drop it and leave the running turn as it is.
+    const steers = get(mobileSteers)[sid] ?? []
+    if (steers.length && get(chatStreaming)[sid]) {
+      mobileSteers.update(m => ({ ...m, [sid]: steers.slice(0, -1) }))
+      showToast(ev.message ?? tr('m.send_fail'), 'error')
+      return
+    }
     chatMessages.update(m => {
       const msgs = [...(m[sid] || [])]
       const lastPending = msgs.findLastIndex((x: any) => x.type === 'user' && x.pending)
@@ -317,6 +361,7 @@ export function wireMobileSession(sid: string): () => void {
 
   cleanups.push(ws.on('history_reload', (ev: any) => {
     if (!forSid(ev)) return
+    mobileSteers.update(m => ({ ...m, [sid]: [] }))
     clearMsgs(sid)
     loadMobileHistory(sid)
   }))

@@ -9,7 +9,7 @@
   import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, sessions, clearMsgs, artifacts } from '../lib/stores'
   import type { Attachment } from '../lib/composerDrafts'
   import { ws } from '../lib/ws'
-  import { wireMobileSession, loadMobileHistory, sendMobile } from './chatWiring'
+  import { wireMobileSession, loadMobileHistory, sendMobile, mobileSteers } from './chatWiring'
   import { renderMarkdown } from '../lib/markdown'
   import { t } from '../lib/i18n'
   import ArtifactsSheet from './ArtifactsSheet.svelte'
@@ -35,6 +35,7 @@
   const sid = $derived($activeSessionId ?? '')
   let showArtifacts = $state(false)
   const msgs = $derived($chatMessages[sid] ?? [])
+  const steers = $derived($mobileSteers[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
   const session = $derived($sessions.find(s => s.id === sid) ?? null)
   const title = $derived(session?.title || session?.name || $t('m.session'))
@@ -225,6 +226,21 @@
       <div class="notice" class:err={msg.level === 'error'}>{msg.content}</div>
     {/if}
   {/each}
+  {#each steers as s (s.id)}
+    <div class="steer" title={$t('status.running')}>
+      <span class="spin"></span>
+      <span class="steer-body">
+        {#if s.content}<span class="steer-text">{s.content}</span>{/if}
+        {#if s.images.length}
+          <span class="atts">
+            {#each s.images as ref, i (i)}
+              {#if ref.startsWith('pdf:')}<span class="chip">{ref.slice(4)}</span>{:else}<span class="thumb small"><AuthedImage src={ref} /></span>{/if}
+            {/each}
+          </span>
+        {/if}
+      </span>
+    </div>
+  {/each}
 </div>
 
 {#if streaming}
@@ -376,6 +392,31 @@
     text-align: center;
   }
   .notice.err { color: var(--m-error); }
+  .steer {
+    align-self: flex-end;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 82%;
+    padding: 9px 12px;
+    border: 1px dashed var(--m-accent);
+    border-radius: 14px 4px 14px 14px;
+    color: var(--m-text-2);
+    font-size: 14px;
+  }
+  .steer-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .steer-text { white-space: pre-wrap; word-break: break-word; }
+  .thumb.small { width: 40px; height: 40px; border-radius: 8px; }
+  .steer .spin {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1.5px solid var(--m-accent);
+    border-right-color: transparent;
+    animation: spin .8s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) { .steer .spin { animation: none } }
   .composer {
     flex: none;
     display: flex;

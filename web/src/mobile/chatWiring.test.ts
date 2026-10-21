@@ -1,5 +1,19 @@
-import { describe, it, expect } from 'vitest'
-import { echoRefs } from './chatWiring'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { get } from 'svelte/store'
+
+// Capture the handlers wireMobileSession registers so a test can fire server
+// events by hand, and record what goes out.
+const handlers: Record<string, (ev: any) => void> = {}
+const sendMessage = vi.fn()
+vi.mock('../lib/ws', () => ({
+  ws: {
+    on: (type: string, fn: (ev: any) => void) => { handlers[type] = fn; return () => delete handlers[type] },
+    sendMessage: (...args: unknown[]) => sendMessage(...args),
+  },
+}))
+
+import { chatMessages, chatStreaming, toasts } from '../lib/stores'
+import { echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
 
 describe('echoRefs', () => {
   it('maps images to their data URL and other files to a pdf: chip ref', () => {
@@ -12,5 +26,64 @@ describe('echoRefs', () => {
   it('is empty without files', () => {
     expect(echoRefs()).toEqual([])
     expect(echoRefs([])).toEqual([])
+  })
+})
+
+describe('insertConfirmedSteer', () => {
+  it('goes ahead of the reply still streaming', () => {
+    const msgs = [{ type: 'user', id: 'u1' }, { type: 'assistant', id: 'a1', streaming: true }]
+    expect(insertConfirmedSteer(msgs, { type: 'user', id: 's' }).map(m => m.id)).toEqual(['u1', 's', 'a1'])
+  })
+
+  it('appends when nothing is streaming', () => {
+    const msgs = [{ type: 'user', id: 'u1' }, { type: 'assistant', id: 'a1', streaming: false }]
+    expect(insertConfirmedSteer(msgs, { type: 'user', id: 's' }).map(m => m.id)).toEqual(['u1', 'a1', 's'])
+  })
+})
+
+describe('sending while a turn runs', () => {
+  const sid = 's1'
+  let unwire: () => void
+
+  beforeEach(() => {
+    unwire?.()
+    sendMessage.mockReset()
+    toasts.set([])
+    mobileSteers.set({})
+    chatMessages.set({ [sid]: [
+      { id: 'u1', type: 'user', content: 'start', createdAt: 1, streaming: false, pending: false, tools: [], todos: [], images: [] },
+      { id: 'a1', type: 'assistant', content: 'working on it', createdAt: 2, streaming: true, tools: [], todos: [] },
+    ] })
+    chatStreaming.set({ [sid]: true })
+    unwire = wireMobileSession(sid)
+  })
+
+  const ids = () => (get(chatMessages)[sid] ?? []).map((m: any) => `${m.type}:${m.content}`)
+
+  it('keeps the message out of the transcript until the turn picks it up', () => {
+    sendMobile(sid, 'also check the docs')
+    expect(sendMessage).toHaveBeenCalledWith(sid, 'also check the docs', undefined)
+    expect(get(mobileSteers)[sid]?.map(s => s.content)).toEqual(['also check the docs'])
+    expect(ids()).toEqual(['user:start', 'assistant:working on it'])
+
+    handlers.history_user_message({ session_id: sid, content: 'also check the docs', created_at: 3 })
+    expect(get(mobileSteers)[sid]).toEqual([])
+    expect(ids()).toEqual(['user:start', 'user:also check the docs', 'assistant:working on it'])
+  })
+
+  it('drops the steer on rejection and leaves the turn running', () => {
+    sendMobile(sid, 'nope')
+    handlers.send_rejected({ session_id: sid, message: 'busy' })
+    expect(get(mobileSteers)[sid]).toEqual([])
+    expect(get(chatStreaming)[sid]).toBe(true)
+    expect(ids()).toEqual(['user:start', 'assistant:working on it'])
+    expect(get(toasts)[0]?.msg).toBe('busy')
+  })
+
+  it('still echoes a send made while idle as a pending bubble', () => {
+    chatStreaming.set({ [sid]: false })
+    sendMobile(sid, 'next')
+    expect(get(mobileSteers)[sid] ?? []).toEqual([])
+    expect(ids()).toEqual(['user:start', 'assistant:working on it', 'user:next'])
   })
 })
