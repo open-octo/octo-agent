@@ -6,14 +6,18 @@
   // lightweight mobile input rather than the desktop Composer.
   import { tick } from 'svelte'
   import { get } from 'svelte/store'
-  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, chatGoal, sessions, clearMsgs, artifacts } from '../lib/stores'
+  import { activeSessionId, chatMessages, chatStreaming, chatProgress, chatTodos, chatTurnStart, chatContextUsage, chatGoal, sessions, clearMsgs, artifacts, showToast } from '../lib/stores'
   import { goalChip } from '../lib/goalChip'
+  import * as api from '../lib/api'
   import type { Attachment } from '../lib/composerDrafts'
   import { ws } from '../lib/ws'
   import { wireMobileSession, loadMobileHistory, sendMobile, mobileSteers } from './chatWiring'
   import { renderMarkdown } from '../lib/markdown'
   import { t } from '../lib/i18n'
   import ArtifactsSheet from './ArtifactsSheet.svelte'
+  import EditMessageSheet from './EditMessageSheet.svelte'
+  import { longpress } from './longpress'
+  import SessionSettings from './SessionSettings.svelte'
   import AuthedImage from './AuthedImage.svelte'
   import ToolGroup from '../components/chat/ToolGroup.svelte'
   import AttachmentStrip from './AttachmentStrip.svelte'
@@ -35,6 +39,7 @@
 
   const sid = $derived($activeSessionId ?? '')
   let showArtifacts = $state(false)
+  let showSettings = $state(false)
   const msgs = $derived($chatMessages[sid] ?? [])
   const steers = $derived($mobileSteers[sid] ?? [])
   const streaming = $derived($chatStreaming[sid] ?? false)
@@ -43,6 +48,39 @@
   // A confirmation raised for THIS session while it's open — surface an inline
   // entry to the approval detail (the feed card is out of view here).
   const pendingApproval = $derived(session?.pending_confirmation ?? false)
+  // How full the context is, as the desktop composer's chip shows it.
+  const ctxUsage = $derived(Number($chatContextUsage[sid] ?? session?.context_usage ?? 0))
+
+  // Editing a sent message (long press on its bubble). The target is captured
+  // when the sheet opens: a re-render can put another bubble at the same list
+  // position, and the server checks index + original text before cutting.
+  let editTarget = $state<{ sid: string; messageIndex: number; content: string } | null>(null)
+  // The desktop's rule: a bubble needs its persisted position; mid-turn only
+  // the turn in flight qualifies (the server interrupts and reruns it) — an
+  // older one would cut finished turns, so it waits until the reply stops.
+  const lastClosedReply = $derived(msgs.findLastIndex((x: any) => x.type === 'assistant' && typeof x.messageIndex === 'number'))
+  function canEdit(i: number): boolean {
+    const m = msgs[i]
+    if (m?.type !== 'user' || typeof m.messageIndex !== 'number' || m.pending) return false
+    return !streaming || i > lastClosedReply
+  }
+  function startEdit(i: number) {
+    if (!canEdit(i)) return
+    editTarget = { sid, messageIndex: msgs[i].messageIndex, content: msgs[i].content }
+  }
+  // The server truncates and reruns by itself (no resend from here) and
+  // broadcasts history_rollback, which reloads the transcript.
+  async function saveEdit(text: string): Promise<boolean> {
+    const target = editTarget
+    if (!target) return false
+    try {
+      await api.editMessage(target.sid, target.messageIndex, text, target.content)
+      return true
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+      return false
+    }
+  }
 
   function stop() {
     if (sid) ws.interrupt(sid)
@@ -164,13 +202,14 @@
   <button class="back" onclick={onBack} aria-label={$t('m.back')}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--m-text)" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
   </button>
-  <div class="dtitle">
+  <button class="dtitle" onclick={() => (showSettings = true)} aria-haspopup="dialog">
     <span class="t">{title}</span>
     <span class="sub">
       <span class="d" class:live={streaming}></span>
-      {streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}
+      <span class="sub-text">{streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}{` · ${ctxUsage}%`}</span>
+      <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
     </span>
-  </div>
+  </button>
   {#if $artifacts.length}
     <button class="arts" onclick={() => (showArtifacts = true)} aria-label={$t('m.artifacts')}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
@@ -178,6 +217,14 @@
     </button>
   {/if}
 </header>
+
+{#if editTarget}
+  <EditMessageSheet content={editTarget.content} onSave={saveEdit} onClose={() => (editTarget = null)} />
+{/if}
+
+{#if showSettings && sid}
+  <SessionSettings sessionId={sid} onClose={() => (showSettings = false)} />
+{/if}
 
 {#if showArtifacts}
   <ArtifactsSheet onClose={() => (showArtifacts = false)} />
@@ -218,7 +265,7 @@
 {/if}
 
 <div class="scroll" bind:this={scroller}>
-  {#each msgs as msg (msg.id)}
+  {#each msgs as msg, i (msg.id)}
     {#if msg.type === 'user'}
       {#if msg.images?.length}
         <div class="atts sent" class:pending={msg.pending}>
@@ -232,7 +279,7 @@
         </div>
       {/if}
       {#if msg.content}
-        <div class="bubble user" class:pending={msg.pending}>{msg.content}</div>
+        <div class="bubble user" class:pending={msg.pending} class:editable={canEdit(i)} use:longpress={canEdit(i) ? () => startEdit(i) : null}>{msg.content}</div>
       {/if}
     {:else if msg.type === 'assistant'}
       <div class="bubble agent">
@@ -317,7 +364,7 @@
     cursor: pointer;
     box-shadow: var(--m-shadow-card);
   }
-  .dtitle { flex: 1; min-width: 0; }
+  .dtitle { flex: 1; min-width: 0; padding: 0; border: none; background: none; font: inherit; text-align: left; cursor: pointer; }
   .dtitle .t {
     display: block;
     font-size: 15px;
@@ -352,7 +399,9 @@
     font-size: 11px;
     color: var(--m-text-3);
   }
-  .sub .d { width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
+  .sub .sub-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub .chev { flex: none; }
+  .sub .d { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
   .sub .d.live { background: var(--m-success); }
   .scroll {
     flex: 1;
@@ -379,6 +428,8 @@
     border-radius: 14px 4px 14px 14px;
   }
   .bubble.user.pending { opacity: .6; }
+  /* Long press edits: keep iOS from selecting text or raising its callout. */
+  .bubble.user.editable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .bubble.agent {
     align-self: flex-start;
     background: var(--m-surface);
