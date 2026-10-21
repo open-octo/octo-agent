@@ -1,6 +1,6 @@
 ---
 title: Install
-description: Install octo on Linux, macOS, or Windows.
+description: Install octo on Linux, macOS, or Windows, and the Android app on your phone.
 ---
 
 import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
@@ -92,6 +92,23 @@ app.
 
 </TabItem>
 </Tabs>
+
+## Mobile app
+
+Reach the same octo from your phone. Android: every release builds
+[**`octo-android.apk`**](https://dl.octo-agent.dev/releases/latest/download/octo-android.apk) — download it on the phone and install it. iOS builds from source
+for now (see [`mobile/`](https://github.com/open-octo/octo-agent/tree/main/mobile)). The app is a
+developer preview.
+
+<Steps>
+1. Install the APK. Allow installs from your browser when Android asks.
+2. On your computer, open **Settings → Mobile** in the desktop app or web UI. Pick or type an address
+   your phone can reach — a LAN address, a Tailscale name, a tunnel URL.
+3. In the app, scan the QR it shows (or paste the link).
+</Steps>
+
+The QR carries your access key, so keep it to yourself. Getting the phone to your computer is your
+network's job — see [Connecting the mobile app](/docs/guides/self-host/#connecting-the-mobile-app).
 
 ## Upgrading
 

@@ -1,6 +1,6 @@
 ---
 title: 安装
-description: 在 Linux、macOS 或 Windows 上安装 octo。
+description: 在 Linux、macOS 或 Windows 上安装 octo，并在手机上装 Android App。
 ---
 
 import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
@@ -84,6 +84,22 @@ irm https://octo-agent.dev/install.ps1 | iex
 
 </TabItem>
 </Tabs>
+
+## 手机 App
+
+在手机上用同一个 octo。Android 每个版本都会构建
+[**`octo-android.apk`**](https://dl.octo-agent.dev/releases/latest/download/octo-android.apk)，在手机上下载后直接安装。iOS 暂时需从源码构建（见
+[`mobile/`](https://github.com/open-octo/octo-agent/tree/main/mobile)）。App 目前是开发者预览。
+
+<Steps>
+1. 安装 APK。系统提示时，允许浏览器安装应用。
+2. 在电脑上打开桌面应用或 Web UI 的**设置 → 手机**，选择或填写一个手机能访问到的地址：局域网地址、
+   Tailscale 域名或隧道 URL。
+3. 在 App 里扫描页面上的二维码（或粘贴链接）。
+</Steps>
+
+二维码里带着你的访问密钥，别给别人看。手机怎么连到电脑交给你的网络，见
+[连接手机 App](/docs/zh/guides/self-host/#连接手机-app)。
 
 ## 升级
 

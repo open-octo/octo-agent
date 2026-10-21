@@ -31,6 +31,8 @@ curl -fsSL https://octo-agent.dev/install.sh | sh     # single binary — no Nod
 octo "Add a --json flag to 'octo config show' and run the tests"   # one prompt → full agentic loop
 ```
 
+**📱 On your phone:** [download the Android app](https://dl.octo-agent.dev/releases/latest/download/octo-android.apk) (built with every release), then scan the QR in **Settings → Mobile** to connect — [setup guide](https://octo-agent.dev/docs/getting-started/install/#mobile-app).
+
 octo is built around that positioning:
 
 - **Works out of the box**: shell, file read/write/edit, search, MCP servers, skills, and sub-agents are all on by default — one message after install is enough for it to actually do work.

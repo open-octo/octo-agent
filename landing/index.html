@@ -177,6 +177,8 @@
     .iface .n{font-family:var(--mono); font-size:12px; color:var(--ink-4); padding-top:6px; width:24px; flex:none;}
     .iface .body{display:flex; flex-direction:column; gap:6px;}
     .iface .t{display:flex; align-items:baseline; gap:12px;}
+    .iface .dl{align-self:flex-start; font-size:13px; color:var(--blue);}
+    .iface .dl:hover{text-decoration:underline;}
     .soon-tag{font-family:var(--mono); font-size:11px; letter-spacing:.1em; color:var(--ink-4);}
 
     /* features */
@@ -314,6 +316,7 @@
           <a href="https://dl.octo-agent.dev/releases/latest/download/octo-setup.pkg">macOS .pkg</a>
           <a href="https://dl.octo-agent.dev/releases/latest/download/octo-setup.exe">Windows .exe</a>
           <a href="https://dl.octo-agent.dev/releases/latest/download/Octo-x86_64.AppImage">Linux AppImage</a>
+          <a href="https://dl.octo-agent.dev/releases/latest/download/octo-android.apk">Android APK</a>
           <a href="https://github.com/open-octo/octo-agent/releases/latest" data-en="All builds &amp; checksums →" data-zh="全部版本与校验和 →"></a>
         </div>
       </div>
@@ -413,7 +416,7 @@
         <div class="iface reveal"><span class="n">05</span><div class="body"><h3 class="item-t" data-en="Web UI" data-zh="Web 界面"></h3><p class="item-p" data-en="Local dashboard at :8088 — browse sessions, inspect tool output, manage skills." data-zh="本地仪表盘（:8088），浏览会话、查看工具输出、管理 skills。"></p></div></div>
         <div class="iface reveal"><span class="n">06</span><div class="body"><h3 class="item-t" data-en="Desktop" data-zh="桌面应用"></h3><p class="item-p" data-en="Native window on macOS, Windows, Linux — real OS file dialogs, tray, notifications." data-zh="macOS / Windows / Linux 原生窗口，系统文件对话框、托盘、原生通知。"></p></div></div>
         <div class="iface reveal"><span class="n">07</span><div class="body"><h3 class="item-t" data-en="IM Bridge" data-zh="IM 桥接"></h3><p class="item-p" data-en="WeChat iLink, Feishu, DingTalk, WeCom, Discord, Telegram — delegate from your phone." data-zh="微信 iLink、飞书、钉钉、企微、Discord、Telegram，从手机派活。"></p></div></div>
-        <div class="iface reveal"><span class="n">08</span><div class="body"><div class="t"><h3 class="item-t" data-en="Mobile" data-zh="移动端"></h3><span class="soon-tag" data-en="DEVELOPER PREVIEW" data-zh="开发者预览"></span></div><p class="item-p" data-en="A thin native client (iOS + Android) that connects straight to octo on your machine, over your LAN, Tailscale or any tunnel. Android APK ships with every release; iOS builds from source; app-store builds are next." data-zh="直连你机器上 octo 的轻量原生客户端（iOS + Android），走局域网、Tailscale 或任意隧道。Android 每个版本附带 APK；iOS 需从源码构建；应用商店版本在路上。"></p></div></div>
+        <div class="iface reveal"><span class="n">08</span><div class="body"><div class="t"><h3 class="item-t" data-en="Mobile" data-zh="移动端"></h3><span class="soon-tag" data-en="DEVELOPER PREVIEW" data-zh="开发者预览"></span></div><p class="item-p" data-en="A thin native client (iOS + Android) that connects straight to octo on your machine, over your LAN, Tailscale or any tunnel. Android APK ships with every release; iOS builds from source; app-store builds are next." data-zh="直连你机器上 octo 的轻量原生客户端（iOS + Android），走局域网、Tailscale 或任意隧道。Android 每个版本附带 APK；iOS 需从源码构建；应用商店版本在路上。"></p><a class="dl" href="https://dl.octo-agent.dev/releases/latest/download/octo-android.apk" data-en="Download the Android APK →" data-zh="下载 Android APK →"></a></div></div>
       </div>
     </div>
   </section>
@@ -603,7 +606,12 @@
       const main=document.getElementById('get-started');
       const label=document.getElementById('dl-label');
       let cfg=null;
-      if(/Mac|iPhone|iPad|iPod/i.test(ua)) cfg={en:'Download for macOS',zh:'下载 macOS 版',href:base+'octo-setup.pkg'};
+      // Phones first: Android's UA also says "Linux", and iPadOS reports a Mac.
+      // iOS has no build to hand out yet, so it keeps the generic button.
+      const ios=/iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(ua) && navigator.maxTouchPoints>1);
+      if(/Android/i.test(ua)) cfg={en:'Download for Android',zh:'下载 Android 版',href:base+'octo-android.apk'};
+      else if(ios) cfg=null;
+      else if(/Mac/i.test(ua)) cfg={en:'Download for macOS',zh:'下载 macOS 版',href:base+'octo-setup.pkg'};
       else if(/Win/i.test(ua)) cfg={en:'Download for Windows',zh:'下载 Windows 版',href:base+'octo-setup.exe'};
       else if(/Linux|X11/i.test(ua)) cfg={en:'Download for Linux',zh:'下载 Linux 版',href:base+'Octo-x86_64.AppImage'};
       if(cfg){

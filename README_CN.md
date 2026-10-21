@@ -31,6 +31,8 @@ curl -fsSL https://octo-agent.dev/install.sh | sh     # 单二进制，无需 No
 octo "给 octo config show 加一个 --json 参数并跑测试"   # 一句话 → 完整 agentic 工具循环
 ```
 
+**📱 手机上用：**[下载 Android App](https://dl.octo-agent.dev/releases/latest/download/octo-android.apk)（每个版本随 CI 构建），在**设置 → 手机**里扫码即可连接，详见[安装指南](https://octo-agent.dev/docs/zh/getting-started/install/#手机-app)。
+
 octo 围绕这个定位构建：
 
 - **开箱即用**：shell、文件读写改、搜索、MCP、skills、子代理等能力默认全部打开，装完一条消息就能真正干活。
