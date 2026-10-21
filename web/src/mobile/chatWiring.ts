@@ -24,12 +24,15 @@ import { inlineSlashCommand } from '../lib/inlineSlash'
 import type { Attachment } from '../lib/composerDrafts'
 import { appendLiveAfterHistory, isReplayedUserEcho } from '../lib/userEchoDedup'
 import { observeArtifact, resetArtifacts } from '../lib/artifacts'
+import { shiftMessageIndices } from '../lib/reindex'
 import {
   chatMessages,
   chatStreaming,
   chatThinking,
   chatProgress,
   chatTodos,
+  chatPermMode,
+  chatContextUsage,
   chatLastTextAt,
   chatGoal,
   addChatMsg,
@@ -62,9 +65,12 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
     })
   } else if (ev.type === 'assistant_message') {
     if (!(ev.content ?? '').trim() && !(ev.thinking ?? '').trim()) return
+    // message_index rides only on a reply that closed a turn; editing reads
+    // it to tell which user messages a running turn still allows.
     addChatMsg(sid, {
       id: uid('a'), type: 'assistant', content: ev.content ?? '', thinking: ev.thinking ?? '',
       createdAt: ev.created_at ?? Date.now(), streaming: false, tools: [], todos: [],
+      messageIndex: ev.message_index,
     })
   } else if (ev.type === 'thinking') {
     if (showReasoning) commitThinking(sid, ev.text ?? '')
@@ -144,8 +150,7 @@ export function sendMobile(sid: string, text: string, files?: Attachment[]) {
   // reach here. /compact keeps the optimistic busy flag: it is a long
   // server-side job that closes with its own session_update idle, which the
   // handler below already listens for. What the others report is the server's
-  // own doing (a history_reload, a toast); goal notices have no mobile surface
-  // yet, which is a separate gap, not something a spinner should paper over.
+  // own doing (a history_reload, a toast, a goal notice).
   const inline = inlineSlashCommand(t, !!(files && files.length))
   if (inline) {
     if (inline === 'compact') chatStreaming.update(s => ({ ...s, [sid]: true }))
@@ -332,6 +337,31 @@ export function wireMobileSession(sid: string): () => void {
     runNotice({ ...ev, type: 'workflow_event' })
   }))
 
+  // The goal bar's snapshot. Carries its own session id: a goal can change in a
+  // session other than the one this handler set is wired for, and keeping it
+  // current means the bar is right when that session opens.
+  cleanups.push(ws.on('goal_updated', (ev: any) => {
+    if (!ev.session_id) return
+    chatGoal.update(m => ({ ...m, [ev.session_id]: ev.goal ?? null }))
+  }))
+
+  // The goal's scrollback lines, as on desktop: the /goal reply, a status
+  // change, and the start of a continuation turn — whose prompt is hidden
+  // server-side, so without this line the turn would look unprompted.
+  cleanups.push(ws.on('goal_notice', (ev: any) => {
+    if (ev.session_id !== sid) return
+    const fixed: Record<string, string> = {
+      start: 'Goal starts — /goal pause to stop',
+      continue: 'Goal continues — /goal pause to stop',
+    }
+    const text = ev.text || fixed[ev.kind ?? '']
+    if (!text) return
+    addChatMsg(sid, {
+      id: uid('note'), type: 'notice', content: text, level: ev.level ?? 'info',
+      createdAt: Date.now(), streaming: false, tools: [], todos: [],
+    })
+  }))
+
   // The session plan (task_create / task_update). Replayed on subscribe, so a
   // freshly opened chat picks up a plan already in progress.
   cleanups.push(ws.on('todo_update', (ev: any) => {
@@ -346,8 +376,16 @@ export function wireMobileSession(sid: string): () => void {
     mobileSteers.update(m => ({ ...m, [sid]: [] }))
     chatStreaming.update(s => ({ ...s, [sid]: false }))
     chatProgress.update(p => ({ ...p, [sid]: null }))
+    // The reply's persisted index when the turn ended on one (as on desktop):
+    // stamp it on the bubble this turn produced, unless that bubble already
+    // has one — a turn that ended with no reply must not relabel the last.
+    const replyIndex = ev.message_index
     chatMessages.update(m => {
       const msgs = (m[sid] || []).map((x: any) => (x.streaming ? { ...x, streaming: false } : x))
+      if (typeof replyIndex === 'number') {
+        const k = msgs.findLastIndex((x: any) => x.type === 'assistant')
+        if (k >= 0 && typeof msgs[k].messageIndex !== 'number') msgs[k] = { ...msgs[k], messageIndex: replyIndex }
+      }
       return { ...m, [sid]: msgs }
     })
     finishAllTools(sid)
@@ -360,6 +398,7 @@ export function wireMobileSession(sid: string): () => void {
       level: 'error', createdAt: Date.now(), streaming: false, tools: [], todos: [],
     })
     chatStreaming.update(s => ({ ...s, [sid]: false }))
+    chatProgress.update(p => ({ ...p, [sid]: null }))
   }))
 
   cleanups.push(ws.on('toast', (ev: any) => {
@@ -416,12 +455,28 @@ export function wireMobileSession(sid: string): () => void {
 
   cleanups.push(ws.on('session_update', (ev: any) => {
     if (!forSid(ev)) return
+    // A permission-mode change from another client keeps the settings sheet
+    // current; partial pings carry no mode and must not clear it.
+    if (typeof ev.permission_mode === 'string' && ev.permission_mode) {
+      chatPermMode.update(m => ({ ...m, [sid]: ev.permission_mode }))
+    }
+    if (typeof ev.context_usage === 'number') {
+      chatContextUsage.update(u => ({ ...u, [sid]: ev.context_usage }))
+    }
     // Mobile only needs the idle snapshot to clear a stale streaming indicator.
     if (ev.status === 'idle') {
       chatStreaming.update(s => ({ ...s, [sid]: false }))
       chatProgress.update(p => ({ ...p, [sid]: null }))
       chatThinking.update(t => ({ ...t, [sid]: '' }))
     }
+  }))
+
+  // A mid-turn compaction moved every persisted index on disk; shift the ones
+  // the bubbles carry so editing a message still targets the right one.
+  cleanups.push(ws.on('history_reindex', (ev: any) => {
+    if (!forSid(ev)) return
+    const folded = Number(ev.folded_msgs) || 0
+    chatMessages.update(m => (m[sid] ? { ...m, [sid]: shiftMessageIndices(m[sid], folded) } : m))
   }))
 
   cleanups.push(ws.on('history_reload', (ev: any) => {

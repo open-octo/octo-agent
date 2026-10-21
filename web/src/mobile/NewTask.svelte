@@ -11,6 +11,7 @@
   import { t, tr } from '../lib/i18n'
   import type { Attachment } from '../lib/composerDrafts'
   import AttachmentStrip from './AttachmentStrip.svelte'
+  import { loadModelOptions, normalizePermMode, PERM_MODES, type ModelOption } from './sessionOptions'
   import { AttachmentTray } from './attachments.svelte'
 
   // groupId preselects a project: set when opened from that project's page.
@@ -34,37 +35,15 @@
   // '' = the server default sender; anything else is the composite
   // "<endpoint>::<model>" id updateSessionModel resolves.
   let modelId = $state('')
-  let models = $state<{ id: string; label: string }[]>([])
+  let models = $state<ModelOption[]>([])
   $effect(() => {
-    api.getEndpoints()
-      .then(d => {
-        const flat: { id: string; label: string; endpoint: string }[] = []
-        for (const e of d.endpoints ?? []) {
-          // The endpoint's display name is what the user named it in Settings;
-          // its id is only the fallback for an unnamed one.
-          const ep = e.name || e.id
-          for (const m of e.models ?? []) flat.push({ id: `${e.id}::${m.model}`, label: m.model, endpoint: ep })
-        }
-        // The same model on two endpoints would render two identical options;
-        // qualify duplicates with their endpoint.
-        const seen = new Map<string, number>()
-        for (const m of flat) seen.set(m.label, (seen.get(m.label) ?? 0) + 1)
-        models = flat.map(m => ({ id: m.id, label: seen.get(m.label)! > 1 ? `${m.label} · ${m.endpoint}` : m.label }))
-      })
-      .catch(() => {})
+    loadModelOptions().then(m => (models = m)).catch(() => {})
   })
 
-  // globalPermissionMode is seeded 'ask' and only overwritten when config.yml
-  // sets one of the engine modes — normalize before using it as the segment
-  // default and the skip-if-unchanged baseline.
-  const g = get(globalPermissionMode)
-  const basePermMode = ['interactive', 'auto', 'strict'].includes(g) ? g : 'interactive'
+  // The segment default and the skip-if-unchanged baseline: the global mode,
+  // normalized (it is seeded 'ask' until config.yml sets an engine mode).
+  const basePermMode = normalizePermMode(get(globalPermissionMode))
   let permMode = $state(basePermMode)
-  const permModes = [
-    { m: 'interactive', key: 'm.perm_ask' },
-    { m: 'auto', key: 'm.perm_auto' },
-    { m: 'strict', key: 'm.perm_strict' },
-  ]
 
   async function create() {
     if (creating || !tray.ready(prompt.trim())) return
@@ -152,15 +131,11 @@
   <p class="lbl">{$t('m.perm_mode')}</p>
   <div class="card pad">
     <div class="seg">
-      {#each permModes as p (p.m)}
+      {#each PERM_MODES as p (p.m)}
         <button class="segi" class:on={permMode === p.m} aria-pressed={permMode === p.m} onclick={() => (permMode = p.m)}>{$t(p.key)}</button>
       {/each}
     </div>
-    <p class="note">
-      {permMode === 'auto' ? $t('m.perm_note_auto')
-        : permMode === 'strict' ? $t('m.perm_note_strict')
-        : $t('m.perm_note_ask')}
-    </p>
+    <p class="note">{$t(PERM_MODES.find(p => p.m === permMode)?.note ?? 'm.perm_note_ask')}</p>
   </div>
 
   <button class="go" disabled={creating || tray.uploading} onclick={create}>

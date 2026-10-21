@@ -12,7 +12,7 @@ vi.mock('../lib/ws', () => ({
   },
 }))
 
-import { agentRunTrails, chatMessages, chatStreaming, toasts } from '../lib/stores'
+import { agentRunTrails, chatContextUsage, chatGoal, chatMessages, chatPermMode, chatStreaming, toasts } from '../lib/stores'
 import { agentRunNotice, echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
 
 describe('echoRefs', () => {
@@ -106,6 +106,49 @@ describe('sending while a turn runs', () => {
       'notice:Sub-agent “scan repo” completed',
       'notice:Workflow “release” failed',
     ])
+  })
+
+  it('keeps the goal snapshot current and adds goal notices to the transcript', () => {
+    chatGoal.set({})
+    handlers.goal_updated({ session_id: sid, goal: { objective: 'ship it', status: 'active' } })
+    expect(get(chatGoal)[sid]).toMatchObject({ objective: 'ship it' })
+    handlers.goal_notice({ session_id: sid, kind: 'continue' })
+    handlers.goal_notice({ session_id: 'other', kind: 'continue' })
+    expect(ids().filter(x => x.startsWith('notice:'))).toEqual(['notice:Goal continues — /goal pause to stop'])
+  })
+
+  it('stamps the reply index from complete on the reply the turn produced', () => {
+    handlers.complete({ session_id: sid, message_index: 7 })
+    const msgs = get(chatMessages)[sid] as any[]
+    expect(msgs[1]).toMatchObject({ type: 'assistant', messageIndex: 7, streaming: false })
+    // A later complete without a new reply leaves the stamped one alone.
+    handlers.complete({ session_id: sid, message_index: 9 })
+    expect((get(chatMessages)[sid] as any[])[1].messageIndex).toBe(7)
+  })
+
+  it('follows a permission-mode change from another client, ignoring partial pings', () => {
+    chatPermMode.set({})
+    handlers.session_update({ session_id: sid, permission_mode: 'strict' })
+    handlers.session_update({ session_id: sid, status: 'running' })
+    expect(get(chatPermMode)[sid]).toBe('strict')
+  })
+
+  it('tracks context usage from session_update', () => {
+    chatContextUsage.set({})
+    handlers.session_update({ session_id: sid, context_usage: 63 })
+    handlers.session_update({ session_id: sid, status: 'running' })
+    expect(get(chatContextUsage)[sid]).toBe(63)
+  })
+
+  it('shifts message indices after a mid-turn compaction', () => {
+    chatMessages.update(m => ({ ...m, [sid]: [
+      { id: 'u0', type: 'user', content: 'old', messageIndex: 0 },
+      { id: 'u5', type: 'user', content: 'recent', messageIndex: 5 },
+    ] as any }))
+    handlers.history_reindex({ session_id: sid, folded_msgs: 3 })
+    const msgs = get(chatMessages)[sid] as any[]
+    expect(msgs[0].messageIndex).toBeUndefined()
+    expect(msgs[1].messageIndex).toBe(3)
   })
 
   it('still echoes a send made while idle as a pending bubble', () => {
