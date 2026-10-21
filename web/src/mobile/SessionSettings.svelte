@@ -42,6 +42,8 @@
     onClose()
   }
 
+  let modelSelect: HTMLSelectElement | undefined = $state()
+
   async function pickModel(id: string) {
     if (busy || id === modelId) return
     busy = true
@@ -50,6 +52,9 @@
       sessions.update(list => list.map(s => (s.id === sessionId ? { ...s, model: res.model, model_id: id } : s)))
     } catch (e: any) {
       showToast(e?.message ?? tr('m.model_fail'), 'error')
+      // The select is one-way bound to modelId, which never changed; put the
+      // control back on it.
+      if (modelSelect) modelSelect.value = modelId
     } finally {
       busy = false
     }
@@ -86,7 +91,7 @@
   </div>
 
   <p class="lbl">{$t('m.model')}</p>
-  <select class="select" value={modelId} disabled={busy} aria-label={$t('m.model')} onchange={(e) => pickModel((e.currentTarget as HTMLSelectElement).value)}>
+  <select class="select" bind:this={modelSelect} value={modelId} disabled={busy} aria-label={$t('m.model')} onchange={(e) => pickModel((e.currentTarget as HTMLSelectElement).value)}>
     <option value="">{$t('m.default')}</option>
     {#each options as m (m.id)}
       <option value={m.id}>{m.label}</option>
