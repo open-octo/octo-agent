@@ -100,14 +100,18 @@
   // Delete asks first, inside the card (window.confirm isn't surfaced by every
   // WebView).
   let confirmingId = $state<string | null>(null)
+  let deletingId = $state<string | null>(null)
   async function deleteTask(t: api.TaskResponse) {
     confirmingId = null
+    deletingId = t.id
     try {
       await api.deleteTask(t.id)
       tasks = tasks.filter(x => x.id !== t.id)
       showToast(tr('tasks.toast_deleted'))
     } catch (e: any) {
       showToast(e?.message ?? String(e), 'error')
+    } finally {
+      deletingId = null
     }
   }
 
@@ -193,7 +197,7 @@
           </div>
         {:else}
           <div class="acts">
-            <button class="ghost danger" onclick={() => (confirmingId = t2.id)}>{$t('common.delete')}</button>
+            <button class="ghost danger" disabled={deletingId === t2.id} onclick={() => (confirmingId = t2.id)}>{$t('common.delete')}</button>
             <button class="ghost" disabled={opening} onclick={() => editTask(t2)}>{$t('common.edit')}</button>
             <button class="run" disabled={runningId !== null} onclick={() => runNow(t2)}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
