@@ -7,14 +7,12 @@
   let { src, alt = '' }: { src: string; alt?: string } = $props()
 
   let blobURL = $state('')
-  let failed = $state(false)
   const direct = $derived(!src.startsWith('/'))
 
   $effect(() => {
     const path = src
     if (!path.startsWith('/')) return
     let cancelled = false
-    failed = false
     fetch(path)
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
       .then((b) => {
@@ -22,7 +20,7 @@
         if (blobURL) URL.revokeObjectURL(blobURL)
         blobURL = URL.createObjectURL(b)
       })
-      .catch(() => { if (!cancelled) failed = true })
+      .catch(() => {})
     return () => { cancelled = true }
   })
   onDestroy(() => { if (blobURL) URL.revokeObjectURL(blobURL) })
@@ -31,7 +29,7 @@
 {#if direct || blobURL}
   <img src={direct ? src : blobURL} {alt} />
 {:else}
-  <span class="ph" class:failed></span>
+  <span class="ph"></span>
 {/if}
 
 <style>

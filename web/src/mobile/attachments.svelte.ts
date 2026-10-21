@@ -13,6 +13,10 @@ const MAX_IMAGE_BYTES = 32 * 1024 * 1024
 const MAX_FILE_BYTES = 512 * 1024 * 1024
 // Everything rides one WS message bounded by the server's 4 MB cap.
 const MAX_BATCH_CHARS = 3_500_000
+// What the server's agent.NewImageBlock accepts. Anything else (SVG, or a
+// HEIC the WebView can't canvas-decode) would be dropped server-side, and a
+// text-less message would then get no reply at all — refuse it here instead.
+const SENDABLE_IMAGE = /^data:image\/(jpeg|png|gif|webp)[;,]/
 
 let seq = 0
 
@@ -39,6 +43,7 @@ export class AttachmentTray {
     try {
       if (isImage) {
         const dataUrl = await compressImage(file)
+        if (!SENDABLE_IMAGE.test(dataUrl)) throw new Error(tr('m.attach_img_unsupported'))
         patch({ data_url: dataUrl, mime_type: dataUrl.startsWith('data:image/jpeg') ? 'image/jpeg' : file.type, uploading: false })
       } else {
         patch({ path: await api.uploadFile(file), uploading: false })

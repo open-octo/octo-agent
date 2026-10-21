@@ -68,6 +68,9 @@
 
   async function create() {
     if (creating || !tray.ready(prompt.trim())) return
+    // Snapshot now: the awaits below leave room to touch the tray, and a file
+    // still uploading must not slip into the first message as an empty stub.
+    const files = [...tray.items]
     creating = true
     try {
       const sess = await api.createSession({ source: 'manual', ...(projectId ? { group_id: projectId } : {}) })
@@ -90,7 +93,7 @@
         await api.updateSessionPermissionMode(sess.id, permMode).catch((e: any) =>
           showToast(e?.message ?? tr('m.perm_fail'), 'error'))
       }
-      onCreated(sess.id, prompt.trim(), [...tray.items])
+      onCreated(sess.id, prompt.trim(), files)
     } catch (e: any) {
       showToast(e?.message ?? tr('m.create_fail'), 'error')
       creating = false
@@ -117,7 +120,7 @@
     ></textarea>
     <div class="attach-row">
       <input type="file" multiple hidden bind:this={fileInput} onchange={(e) => tray.addFromInput(e)} />
-      <button class="attach" onclick={() => fileInput?.click()} aria-label={$t('chat.attach_file')}>
+      <button class="attach" disabled={creating} onclick={() => fileInput?.click()} aria-label={$t('chat.attach_file')}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
       </button>
       {#if tray.items.length}<AttachmentStrip {tray} />{/if}
@@ -185,6 +188,7 @@
     outline: none;
   }
   .prompt::placeholder { color: var(--m-text-4); }
+  .attach:disabled { opacity: .5; }
   .attach-row { display: flex; align-items: flex-start; gap: 8px; padding: 0 12px 12px; }
   .attach {
     flex: none; width: 34px; height: 34px; border-radius: 50%; border: none;
