@@ -272,6 +272,7 @@
     importBusy = true
     try {
       importSource = await api.uploadFile(file)
+      importReplace = false
     } catch (err: any) {
       showToast(err?.message ?? String(err), 'error')
     } finally {
@@ -293,7 +294,8 @@
         showToast(tr('skills.import_error') + (r.error ?? 'unknown'), 'error')
         return
       }
-      skills = (await api.listSkills()) as Skill[]
+      const fresh = await api.listSkills().catch(() => null)
+      if (fresh) skills = fresh as Skill[]
       showToast(tr('skills.toast_imported').replace('{name}', r.name ?? ''))
       importOpen = false
       importSource = ''
@@ -429,7 +431,7 @@
     {#if importOpen}
       <div class="card import">
         <p class="ask">{$t('skills.import_hint')}</p>
-        <input class="field" bind:value={importSource} placeholder={$t('skills.import_placeholder')} aria-label={$t('skills.import_title')} />
+        <input class="field" bind:value={importSource} oninput={() => (importReplace = false)} placeholder={$t('skills.import_placeholder')} aria-label={$t('skills.import_title')} />
         <input type="file" accept=".zip" hidden bind:this={zipInput} onchange={pickZip} />
         {#if importReplace}
           <p class="ask">{$t('skills.import_confirm_replace')}</p>
@@ -471,7 +473,10 @@
                   </div>
                 {:else}
                   <div class="acts">
-                    <button class="pill danger" disabled={busyRow === key} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
+                    <!-- System and expert skills ship with octo; the server refuses to delete them. -->
+                    {#if s.source === 'user'}
+                      <button class="pill danger" disabled={busyRow !== null} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
+                    {/if}
                     <button class="pill" disabled={opening} onclick={() => editSkill(s.name)}>{$t('skills.edit_with_agent')}</button>
                     <button class="pill strong" disabled={opening || !s.enabled} onclick={() => useSkill(s.name)}>{$t('skills.use')}</button>
                   </div>
@@ -513,7 +518,7 @@
                   </div>
                 {:else}
                   <div class="acts">
-                    <button class="pill danger" disabled={busyRow === key} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
+                    <button class="pill danger" disabled={busyRow !== null} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
                     <button class="pill strong" disabled={opening} onclick={() => editMcp(m.name)}>{$t('skills.edit_with_agent')}</button>
                   </div>
                 {/if}
