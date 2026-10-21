@@ -43,8 +43,10 @@
   // Me tab: the server's capability inventory — Light Apps, skills, MCP
   // servers, workflows, memories — and trash as a root list drilling into
   // per-kind sections, followed by the app's own preferences and about. Remote-control scope: Light Apps open full-screen,
-  // skills/MCP get enable switches; memories can be read, forgotten or handed
-  // to the assistant to update, trashed files restored or deleted (the
+  // skills/MCP get enable switches plus the desktop's create / edit / use /
+  // import / delete (agentic where the desktop is: a fresh chat runs the
+  // skill-creator or mcp-creator skill); memories can be read, forgotten or
+  // handed to the assistant to update, trashed files restored or deleted (the
   // desktop Profile / File Recall actions); workflows are read-only.
   import { onMount } from 'svelte'
   import { showToast, prependSession } from '../lib/stores'
@@ -189,19 +191,112 @@
       busyRow = null
     }
   }
-  // The desktop Profile page's "update" action: a fresh chat with the same ask.
+  // The desktop's openAgentSession on the phone's own navigation: a fresh,
+  // named session, opened in the chat with its first message.
   let opening = $state(false)
-  async function reviewMemories() {
+  async function openAgentic(prompt: string, name: string) {
     if (opening) return
     opening = true
     try {
-      const sess = await api.createSession({ source: 'manual', name: tr('profile.session_memories') })
+      const sess = await api.createSession({ source: 'manual', name })
       prependSession(sess)
-      onAgentSession(sess.id, 'Review my saved memories and help me update or remove any that are stale.')
+      onAgentSession(sess.id, prompt)
     } catch (e: any) {
       showToast(e?.message ?? tr('m.create_fail'), 'error')
     } finally {
       opening = false
+    }
+  }
+  // The desktop Profile page's "update" action: the same ask.
+  const reviewMemories = () =>
+    openAgentic('Review my saved memories and help me update or remove any that are stale.', tr('profile.session_memories'))
+
+  // ── skills and MCP servers: the desktop pages' actions ────────────────────
+  // A row's actions show when its name is tapped; one row open at a time.
+  let openRow = $state<string | null>(null)
+  const toggleRow = (key: string) => {
+    openRow = openRow === key ? null : key
+    confirming = null
+  }
+  const createSkill = () => openAgentic('/skill-creator', tr('skills.session_new'))
+  const useSkill = (name: string) => openAgentic(`/${name}`, name)
+  const editSkill = (name: string) =>
+    openAgentic(`/skill-creator Edit the existing "${name}" skill.`, tr('skills.session_edit').replace('{name}', name))
+  const setupMcp = () => openAgentic('/mcp-creator', tr('mcp.session_setup'))
+  const editMcp = (name: string) =>
+    openAgentic(`/mcp-creator Edit the existing MCP server "${name}" — find its entry, show me the current config, then ask what I want changed.`, tr('mcp.session_edit').replace('{name}', name))
+
+  async function deleteSkill(name: string) {
+    confirming = null
+    busyRow = `skill:${name}`
+    try {
+      await api.deleteSkill(name)
+      skills = skills.filter(s => s.name !== name)
+      showToast(tr('skills.toast_deleted').replace('{name}', name))
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+    } finally {
+      busyRow = null
+    }
+  }
+  async function deleteMcp(name: string) {
+    confirming = null
+    busyRow = `mcp:${name}`
+    try {
+      await api.deleteMcpServer(name)
+      mcp = mcp.filter(m => m.name !== name)
+      showToast(tr('mcp.toast_removed'))
+    } catch {
+      showToast(tr('mcp.toast_delete_fail'), 'error')
+    } finally {
+      busyRow = null
+    }
+  }
+
+  // Import a skill from a GitHub link / owner/repo / server path, or a .zip
+  // uploaded first — the desktop's import dialog, inline.
+  let importOpen = $state(false)
+  let importSource = $state('')
+  let importBusy = $state(false)
+  let importReplace = $state(false)
+  let zipInput: HTMLInputElement | undefined = $state()
+  async function pickZip(e: Event) {
+    const input = e.currentTarget as HTMLInputElement
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+    importBusy = true
+    try {
+      importSource = await api.uploadFile(file)
+    } catch (err: any) {
+      showToast(err?.message ?? String(err), 'error')
+    } finally {
+      importBusy = false
+    }
+  }
+  async function doImport(force = false) {
+    const source = importSource.trim()
+    if (!source || importBusy) return
+    importBusy = true
+    importReplace = false
+    try {
+      const r = await api.importSkill(source, force)
+      if (r.conflict && !force) {
+        importReplace = true
+        return
+      }
+      if (!r.ok) {
+        showToast(tr('skills.import_error') + (r.error ?? 'unknown'), 'error')
+        return
+      }
+      skills = (await api.listSkills()) as Skill[]
+      showToast(tr('skills.toast_imported').replace('{name}', r.name ?? ''))
+      importOpen = false
+      importSource = ''
+    } catch (err: any) {
+      showToast(tr('skills.import_error') + (err?.message ?? String(err)), 'error')
+    } finally {
+      importBusy = false
     }
   }
 
@@ -321,36 +416,103 @@
       </div>
     {/if}
   {:else if section === 'skills'}
+    <div class="acts top">
+      <button class="pill" onclick={() => { importOpen = !importOpen; importReplace = false }}>{$t('skills.import')}</button>
+      <button class="pill strong" disabled={opening} onclick={createSkill}>{$t('skills.create')}</button>
+    </div>
+    {#if importOpen}
+      <div class="card import">
+        <p class="ask">{$t('skills.import_hint')}</p>
+        <input class="field" bind:value={importSource} placeholder={$t('skills.import_placeholder')} aria-label={$t('skills.import_title')} />
+        <input type="file" accept=".zip" hidden bind:this={zipInput} onchange={pickZip} />
+        {#if importReplace}
+          <p class="ask">{$t('skills.import_confirm_replace')}</p>
+          <div class="acts">
+            <button class="pill" onclick={() => (importReplace = false)}>{$t('m.cancel')}</button>
+            <button class="pill danger" disabled={importBusy} onclick={() => doImport(true)}>{$t('skills.import_install')}</button>
+          </div>
+        {:else}
+          <div class="acts">
+            <button class="pill" disabled={importBusy} onclick={() => zipInput?.click()}>{$t('skills.import_browse')}</button>
+            <button class="pill strong" disabled={importBusy || !importSource.trim()} onclick={() => doImport()}>
+              {importBusy ? $t('skills.import_installing') : $t('skills.import_install')}
+            </button>
+          </div>
+        {/if}
+      </div>
+    {/if}
     {#if skills.length === 0}<div class="empty">{$t('m.no_skills')}</div>{:else}
       <div class="card group">
         {#each skills as s (s.name)}
-          <div class="row">
-            <div class="names">
-              <span class="rlabel">{s.name} <span class="tag">{s.tagLabel}</span></span>
-              {#if s.desc}<span class="sub">{s.desc}</span>{/if}
+          {@const key = `skill:${s.name}`}
+          <div class="item">
+            <div class="row">
+              <button class="names tap" onclick={() => toggleRow(key)} aria-expanded={openRow === key}>
+                <span class="rlabel">{s.name} <span class="tag">{s.tagLabel}</span></span>
+                {#if s.desc}<span class="sub">{s.desc}</span>{/if}
+              </button>
+              <button class="switch" class:on={s.enabled} role="switch" aria-checked={s.enabled}
+                aria-label={s.name} disabled={togglingName !== null} onclick={() => toggleSkill(s)}
+              ><span class="knob"></span></button>
             </div>
-            <button class="switch" class:on={s.enabled} role="switch" aria-checked={s.enabled}
-              aria-label={s.name} disabled={togglingName !== null} onclick={() => toggleSkill(s)}
-            ><span class="knob"></span></button>
+            {#if openRow === key}
+              <div class="detail">
+                {#if confirming === key}
+                  <p class="ask">{$t('skills.confirm_delete').replace('{name}', s.name)}</p>
+                  <div class="acts">
+                    <button class="pill" onclick={() => (confirming = null)}>{$t('m.cancel')}</button>
+                    <button class="pill danger" onclick={() => deleteSkill(s.name)}>{$t('common.delete')}</button>
+                  </div>
+                {:else}
+                  <div class="acts">
+                    <button class="pill danger" disabled={busyRow === key} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
+                    <button class="pill" disabled={opening} onclick={() => editSkill(s.name)}>{$t('skills.edit_with_agent')}</button>
+                    <button class="pill strong" disabled={opening || !s.enabled} onclick={() => useSkill(s.name)}>{$t('skills.use')}</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
     {/if}
   {:else if section === 'mcp'}
+    <div class="acts top">
+      <button class="pill strong" disabled={opening} onclick={setupMcp}>{$t('mcp.ai_setup')}</button>
+    </div>
     {#if mcp.length === 0}<div class="empty">{$t('m.no_mcp')}</div>{:else}
       <div class="card group">
         {#each mcp as m (m.name)}
-          <div class="row">
-            <div class="names">
-              <span class="rlabel">
-                <span class="dot" class:ok={m.status === 'connected'} class:bad={m.status === 'error' || m.status === 'invalid'}></span>
-                {m.name}
-              </span>
-              <span class="sub">{m.transport || '—'} · {$t('m.n_tools').replace('{n}', String(m.tools))} · {mcpStatusKey[m.status] ? $t(mcpStatusKey[m.status]) : m.status}</span>
+          {@const key = `mcp:${m.name}`}
+          <div class="item">
+            <div class="row">
+              <button class="names tap" onclick={() => toggleRow(key)} aria-expanded={openRow === key}>
+                <span class="rlabel">
+                  <span class="dot" class:ok={m.status === 'connected'} class:bad={m.status === 'error' || m.status === 'invalid'}></span>
+                  {m.name}
+                </span>
+                <span class="sub">{m.transport || '—'} · {$t('m.n_tools').replace('{n}', String(m.tools))} · {mcpStatusKey[m.status] ? $t(mcpStatusKey[m.status]) : m.status}</span>
+              </button>
+              <button class="switch" class:on={!m.disabled} role="switch" aria-checked={!m.disabled}
+                aria-label={m.name} disabled={togglingName !== null} onclick={() => toggleMcp(m)}
+              ><span class="knob"></span></button>
             </div>
-            <button class="switch" class:on={!m.disabled} role="switch" aria-checked={!m.disabled}
-              aria-label={m.name} disabled={togglingName !== null} onclick={() => toggleMcp(m)}
-            ><span class="knob"></span></button>
+            {#if openRow === key}
+              <div class="detail">
+                {#if confirming === key}
+                  <p class="ask">{$t('mcp.confirm_delete').replace('{name}', m.name)}</p>
+                  <div class="acts">
+                    <button class="pill" onclick={() => (confirming = null)}>{$t('m.cancel')}</button>
+                    <button class="pill danger" onclick={() => deleteMcp(m.name)}>{$t('common.delete')}</button>
+                  </div>
+                {:else}
+                  <div class="acts">
+                    <button class="pill danger" disabled={busyRow === key} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
+                    <button class="pill strong" disabled={opening} onclick={() => editMcp(m.name)}>{$t('skills.edit_with_agent')}</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -483,6 +645,14 @@
   .pill.danger { color: var(--m-error); }
   .pill.strong { color: var(--m-accent); }
   .pill:disabled { opacity: .45; cursor: default; }
+  .acts.top { margin: 0 0 10px; }
+  .names.tap { background: none; border: none; padding: 0; font: inherit; text-align: left; cursor: pointer; }
+  .card.import { padding: 12px 16px; margin-bottom: 12px; }
+  .field {
+    width: 100%; box-sizing: border-box; margin-top: 8px; padding: 9px 12px;
+    border: 1px solid var(--m-border); border-radius: 10px; background: var(--m-bg);
+    color: var(--m-text); font: inherit; font-size: 16px; outline: none;
+  }
   .hint { margin: 12px 4px 0; font-size: 12px; color: var(--m-text-3); }
   .wide-btn {
     display: block; width: 100%; margin-top: 10px; min-height: 44px; border-radius: 12px;
