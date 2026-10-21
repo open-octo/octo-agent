@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import type { LightApp } from '../lib/api'
+  import type { LightApp, Agent, EndpointsResponse, ProviderPreset } from '../lib/api'
   import type { Skill, Workflow, Memory } from '../lib/types'
 
   // The trash endpoint's real wire shape ({ files: [...] }); api.listTrash's
@@ -36,29 +36,35 @@
     workflows: Workflow[]
     memories: Memory[]
     trash: TrashEntry[]
+    agents: Agent[]
+    endpoints: EndpointsResponse
+    providers: ProviderPreset[]
   } | null = null
 </script>
 
 <script lang="ts">
-  // Me tab: the server's capability inventory — Light Apps, skills, MCP
-  // servers, workflows, memories — and trash as a root list drilling into
+  // Me tab: the server's capability inventory — Light Apps, agents, skills,
+  // MCP servers, workflows, memories — plus endpoints and trash as a root list drilling into
   // per-kind sections, followed by the app's own preferences and about. Remote-control scope: Light Apps open full-screen,
   // skills/MCP get enable switches plus the desktop's create / edit / use /
   // import / delete (agentic where the desktop is: a fresh chat runs the
   // skill-creator or mcp-creator skill); memories can be read, forgotten or
   // handed to the assistant to update, trashed files restored or deleted (the
-  // desktop Profile / File Recall actions); workflows are read-only.
+  // desktop Profile / File Recall actions), as can soul.md / user.md; agents
+  // are summoned, hidden or shown, created / edited (agentic) or deleted;
+  // endpoints are read-only with a connection test; workflows are read-only.
   import { onMount } from 'svelte'
   import { showToast, prependSession } from '../lib/stores'
   import { renderMarkdown } from '../lib/markdown'
   import * as api from '../lib/api'
-  import { t, tr } from '../lib/i18n'
+  import { t, tr, pickLocalized } from '../lib/i18n'
   import PageViewer from './PageViewer.svelte'
   import Prefs from './Prefs.svelte'
   import { pageSrc } from './pageURL'
 
   let { onAgentSession }: {
-    // A fresh session plus the first message to send once its chat is open.
+    // A fresh session plus the first message to send once its chat is open
+    // ('' for none).
     onAgentSession: (id: string, prompt: string) => void
   } = $props()
 
@@ -67,7 +73,7 @@
     invalid: 'm.mcp_invalid', disconnected: 'm.mcp_disconnected',
   }
 
-  type Section = 'root' | 'apps' | 'skills' | 'mcp' | 'workflows' | 'memory' | 'trash'
+  type Section = 'root' | 'apps' | 'agents' | 'skills' | 'mcp' | 'workflows' | 'memory' | 'endpoints' | 'trash'
   let section = $state<Section>('root')
 
   let loading = $state(cached === null)
@@ -78,20 +84,26 @@
   let memories = $state<Memory[]>(cached?.memories ?? [])
   let trash = $state<TrashEntry[]>(cached?.trash ?? [])
   let apps = $state<api.LightApp[]>(cached?.apps ?? [])
+  let agents = $state<Agent[]>(cached?.agents ?? [])
+  let endpoints = $state<EndpointsResponse>(cached?.endpoints ?? { endpoints: [] })
+  let providers = $state<ProviderPreset[]>(cached?.providers ?? [])
   $effect(() => {
-    if (!loading && !loadError) cached = { apps, skills, mcp, workflows, memories, trash }
+    if (!loading && !loadError) cached = { apps, skills, mcp, workflows, memories, trash, agents, endpoints, providers }
   })
 
   async function load() {
     loading = cached === null
     loadError = false
-    const [la, sk, mc, wf, me, trs] = await Promise.all([
+    const [la, sk, mc, wf, me, trs, ag, ep, pv] = await Promise.all([
       api.listLightApps().catch(() => null),
       api.listSkills().catch(() => null),
       api.listMcpServers().catch(() => null),
       api.listWorkflowsView().catch(() => null),
       api.getMemories().catch(() => null),
       api.listTrash().catch(() => null),
+      api.listAgents().catch(() => null),
+      api.getEndpoints().catch(() => null),
+      api.listProviders().catch(() => null),
     ])
     if (la) apps = la
     if (sk) skills = sk
@@ -99,7 +111,11 @@
     if (wf) workflows = wf
     if (me) memories = me
     if (trs) trash = ((trs as any).files ?? trs ?? []) as TrashEntry[]
-    const results = [la, sk, mc, wf, me, trs]
+    if (ag) agents = ag
+    if (ep) endpoints = ep
+    if (pv) providers = pv
+    // Presets only fill in endpoint base URLs; they are not a section.
+    const results = [la, sk, mc, wf, me, trs, ag, ep]
     const failed = results.filter(r => !r).length
     // A failed background refresh keeps the cached inventory on screen.
     loadError = failed === results.length && cached === null
@@ -300,6 +316,95 @@
     }
   }
 
+  // ── agents: the desktop gallery's actions ────────────────────────────────
+  const agentName = (a: Agent) => pickLocalized(a.name, a.name_en)
+  const createAgent = () => openAgentic('/expert-agent-manager', tr('agents.session_new'))
+  const editAgent = (a: Agent) =>
+    openAgentic(`/expert-agent-manager edit ${a.id}`, tr('agents.session_edit').replace('{name}', agentName(a)))
+  // A genuine conversation with the expert (the desktop's summonAgent), so it
+  // opens with no first message.
+  async function summon(a: Agent) {
+    if (opening) return
+    opening = true
+    try {
+      const sess = await api.createSession({ source: 'manual', agent_profile: a.id, name: agentName(a) })
+      prependSession(sess)
+      onAgentSession(sess.id, '')
+    } catch (e: any) {
+      showToast(e?.message ?? tr('m.create_fail'), 'error')
+    } finally {
+      opening = false
+    }
+  }
+  // Curated experts can only be hidden or shown; the server rejects it for
+  // user agents.
+  async function toggleAgent(a: Agent) {
+    busyRow = `agent:${a.id}`
+    try {
+      const r = await api.toggleAgent(a.id)
+      agents = agents.map(x => (x.id === a.id ? { ...x, enabled: r.enabled } : x))
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+    } finally {
+      busyRow = null
+    }
+  }
+  async function deleteAgent(a: Agent) {
+    confirming = null
+    busyRow = `agent:${a.id}`
+    try {
+      await api.deleteAgent(a.id)
+      agents = agents.filter(x => x.id !== a.id)
+    } catch (e: any) {
+      showToast(e?.message ?? String(e), 'error')
+    } finally {
+      busyRow = null
+    }
+  }
+
+  // ── soul.md / user.md: read on tap, updated by the onboard skill ──────────
+  type ProfileDoc = 'soul' | 'user'
+  let profileBody = $state<Partial<Record<ProfileDoc, string | null>>>({})
+  async function toggleProfile(doc: ProfileDoc) {
+    const key = `profile:${doc}`
+    openRow = openRow === key ? null : key
+    if (openRow !== key || profileBody[doc] !== undefined) return
+    profileBody = { ...profileBody, [doc]: null }
+    try {
+      // Both endpoints return { path, content }; the declared types are stale.
+      const d = (await (doc === 'soul' ? api.getProfileSoul() : api.getProfileUser())) as unknown as { content?: string }
+      profileBody = { ...profileBody, [doc]: d.content ?? '' }
+    } catch {
+      profileBody = { ...profileBody, [doc]: undefined }
+      openRow = null
+      showToast(tr('m.load_failed'), 'error')
+    }
+  }
+  const updateProfile = (doc: ProfileDoc) =>
+    openAgentic(`/onboard scope:${doc}`, tr(doc === 'soul' ? 'profile.session_soul' : 'profile.session_user'))
+
+  // ── endpoints: read-only, plus a connection test per model ────────────────
+  const presetFor = (provider: string) => providers.find(p => p.id === provider) ?? null
+  const baseURLOf = (ep: api.EndpointConfig) => ep.base_url || presetFor(ep.provider)?.base_url || ''
+  // Test results keyed by "endpoint::model", the server's composite id.
+  let testing = $state<string | null>(null)
+  let tested = $state<Record<string, { ok: boolean; msg: string }>>({})
+  // No key is sent: the server tests with the key real requests would use —
+  // the vendor's env var, then the endpoint's stored key.
+  async function testModel(ep: api.EndpointConfig, model: string) {
+    const cid = `${ep.id}::${model}`
+    if (testing) return
+    testing = cid
+    try {
+      const r = await api.testConfig({ model, base_url: baseURLOf(ep), provider: ep.provider, protocol: ep.protocol as api.ModelConfigInput['protocol'] })
+      tested = { ...tested, [cid]: { ok: r.ok, msg: r.ok ? tr('models.test.ok') : (r.message || tr('models.test.fail')) } }
+    } catch (e: any) {
+      tested = { ...tested, [cid]: { ok: false, msg: e?.message ?? tr('models.test.fail') } }
+    } finally {
+      testing = null
+    }
+  }
+
   // ── trash: restore (backing up whatever now sits at the path) or delete ───
   // A restore that finds the original path taken asks first, then backs the
   // current file up into the trash and restores — the desktop's lossless way.
@@ -351,14 +456,19 @@
     $t('m.n_enabled').replace('{a}', String(a)).replace('{b}', String(b))
   const groups = $derived([
     { key: 'apps' as Section, label: $t('m.light_apps'), count: $t('m.count_apps').replace('{n}', String(apps.length)) },
+    { key: 'agents' as Section, label: $t('nav.agents'), count: $t('m.count_agents').replace('{n}', String(agents.length)) },
     { key: 'skills' as Section, label: $t('m.skills'), count: nEnabled(skills.filter(s => s.enabled).length, skills.length) },
     { key: 'mcp' as Section, label: $t('m.mcp'), count: nEnabled(mcp.filter(m => !m.disabled).length, mcp.length) },
     { key: 'workflows' as Section, label: $t('m.workflows'), count: $t('m.count_wf').replace('{n}', String(workflows.length)) },
     { key: 'memory' as Section, label: $t('m.memory'), count: $t('m.count_mem').replace('{n}', String(memories.length)) },
   ])
-  const trashRow = $derived({ key: 'trash' as Section, label: $t('m.trash'), count: $t('m.count_trash').replace('{n}', String(trash.length)) })
+  const moreRows = $derived([
+    { key: 'endpoints' as Section, label: $t('settings.endpoints.title'), count: $t('m.count_endpoints').replace('{n}', String(endpoints.endpoints.length)) },
+    { key: 'trash' as Section, label: $t('m.trash'), count: $t('m.count_trash').replace('{n}', String(trash.length)) },
+  ])
   const titleKeys: Record<Section, string> = {
-    root: 'm.tab_me', apps: 'm.light_apps', skills: 'm.skills', mcp: 'm.mcp', workflows: 'm.workflows', memory: 'm.memory', trash: 'm.trash',
+    root: 'm.tab_me', apps: 'm.light_apps', agents: 'nav.agents', skills: 'm.skills', mcp: 'm.mcp', workflows: 'm.workflows',
+    memory: 'm.memory', endpoints: 'settings.endpoints.title', trash: 'm.trash',
   }
 </script>
 
@@ -390,13 +500,14 @@
           </button>
         {/each}
       </div>
-      <p class="hint">{$t('m.desktop_hint')}</p>
       <div class="card group">
-        <button class="row nav" onclick={() => (section = trashRow.key)}>
-          <span class="rlabel">{trashRow.label}</span>
-          <span class="rval">{trashRow.count}</span>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-4)" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
+        {#each moreRows as g (g.key)}
+          <button class="row nav" onclick={() => (section = g.key)}>
+            <span class="rlabel">{g.label}</span>
+            <span class="rval">{g.count}</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-4)" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        {/each}
       </div>
     {/if}
     <Prefs />
@@ -412,6 +523,48 @@
             </div>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--m-text-4)" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
           </button>
+        {/each}
+      </div>
+    {/if}
+  {:else if section === 'agents'}
+    <div class="acts top">
+      <button class="pill strong" disabled={opening} onclick={createAgent}>{$t('agents.create_with_agent')}</button>
+    </div>
+    {#if agents.length === 0}<div class="empty">{$t('agents.empty')}</div>{:else}
+      <div class="card group">
+        {#each agents as a (a.id)}
+          {@const key = `agent:${a.id}`}
+          {@const desc = pickLocalized(a.description, a.description_en)}
+          <div class="item">
+            <button class="row nav" onclick={() => toggleRow(key)} aria-expanded={openRow === key}>
+              <div class="names">
+                <span class="rlabel">{agentName(a)}{#if a.enabled === false} <span class="tag">{$t('agents.hidden')}</span>{/if}</span>
+                {#if desc}<span class="sub">{desc}</span>{/if}
+              </div>
+              <span class="chev" class:open={openRow === key}>›</span>
+            </button>
+            {#if openRow === key}
+              <div class="detail">
+                {#if confirming === key}
+                  <p class="ask">{$t('agents.delete_confirm').replace('{name}', agentName(a))}</p>
+                  <div class="acts">
+                    <button class="pill" onclick={() => (confirming = null)}>{$t('m.cancel')}</button>
+                    <button class="pill danger" onclick={() => deleteAgent(a)}>{$t('common.delete')}</button>
+                  </div>
+                {:else}
+                  <div class="acts">
+                    {#if a.source === 'default'}
+                      <button class="pill" disabled={busyRow === key} onclick={() => toggleAgent(a)}>{a.enabled === false ? $t('agents.show') : $t('agents.hide')}</button>
+                    {:else}
+                      <button class="pill danger" disabled={busyRow === key} onclick={() => (confirming = key)}>{$t('common.delete')}</button>
+                      <button class="pill" disabled={opening} onclick={() => editAgent(a)}>{$t('agents.edit_with_agent')}</button>
+                    {/if}
+                    <button class="pill strong" disabled={opening} onclick={() => summon(a)}>{$t('agents.summon').replace('{name}', agentName(a))}</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
         {/each}
       </div>
     {/if}
@@ -531,6 +684,32 @@
       </div>
     {/if}
   {:else if section === 'memory'}
+    <div class="card group">
+      {#each ['soul', 'user'] as const as doc (doc)}
+        {@const key = `profile:${doc}`}
+        {@const body = profileBody[doc]}
+        <div class="item">
+          <button class="row nav" onclick={() => toggleProfile(doc)} aria-expanded={openRow === key}>
+            <div class="names">
+              <span class="rlabel">{$t(doc === 'soul' ? 'profile.soul' : 'profile.user')}</span>
+              <span class="sub">{$t(doc === 'soul' ? 'profile.soul_title' : 'profile.user_title')}</span>
+            </div>
+            <span class="chev" class:open={openRow === key}>›</span>
+          </button>
+          {#if openRow === key}
+            <div class="detail">
+              {#if body === null || body === undefined}<div class="sub">{$t('m.loading')}</div>
+              {:else if body.trim()}<div class="md">{@html renderMarkdown(body)}</div>
+              {:else}<div class="sub">{$t(doc === 'soul' ? 'profile.soul_empty' : 'profile.user_empty')}</div>{/if}
+              <p class="ask">{$t(doc === 'soul' ? 'profile.soul_hint' : 'profile.user_hint')}</p>
+              <div class="acts">
+                <button class="pill strong" disabled={opening} onclick={() => updateProfile(doc)}>{$t('profile.update')}</button>
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    </div>
     {#if memories.length === 0}<div class="empty">{$t('m.no_mem')}</div>{:else}
       <div class="card group">
         {#each memories as m (m.source + m.name)}
@@ -565,6 +744,42 @@
     {/if}
     <p class="hint">{$t('profile.memories_hint')}</p>
     <button class="wide-btn" disabled={opening} onclick={reviewMemories}>{$t('profile.update')}</button>
+  {:else if section === 'endpoints'}
+    {#if endpoints.endpoints.length === 0}<div class="empty">{$t('m.no_endpoints')}</div>{:else}
+      {#each endpoints.endpoints as ep (ep.id)}
+        <div class="card group">
+          <div class="row">
+            <div class="names">
+              <span class="rlabel">{ep.name || ep.id}</span>
+              <span class="sub">{ep.provider}{baseURLOf(ep) ? ` · ${baseURLOf(ep)}` : ''}{ep.protocol ? ` · ${ep.protocol}` : ''}</span>
+              <span class="sub">{$t('settings.endpoints.api_key')}:
+                <!-- The env var is read before the stored key, so it wins even
+                     when has_api_key is also true. -->
+                {#if ep.api_key_env}{$t('settings.endpoints.api_key.env').replace('{name}', ep.api_key_env)}
+                {:else if ep.has_api_key}{$t('settings.endpoints.api_key.set')}
+                {:else if presetFor(ep.provider)?.custom_endpoint}{$t('settings.endpoints.api_key.optional')}
+                {:else}<span class="bad">{$t('settings.endpoints.api_key.missing')}</span>{/if}
+              </span>
+            </div>
+          </div>
+          {#each ep.models as m (m.model)}
+            {@const cid = `${ep.id}::${m.model}`}
+            <div class="item">
+              <div class="row">
+                <div class="names">
+                  <span class="rlabel">{m.model}{#if endpoints.default === cid} <span class="tag">{$t('settings.endpoints.badge.default')}</span>{/if}</span>
+                  {#if tested[cid]}<span class="sub" class:ok={tested[cid].ok} class:bad={!tested[cid].ok}>{tested[cid].msg}</span>{/if}
+                </div>
+                <button class="pill" disabled={testing !== null} onclick={() => testModel(ep, m.model)}>
+                  {testing === cid ? $t('models.btn.testing') : $t('models.btn.test')}
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/each}
+    {/if}
+    <p class="hint">{$t('m.desktop_hint')}</p>
   {:else if section === 'trash'}
     {#if trash.length === 0}<div class="empty">{$t('m.trash_empty')}</div>{:else}
       <div class="card group">
@@ -671,6 +886,8 @@
   .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
   .dot.ok { background: var(--m-success); }
   .dot.bad { background: var(--m-error); }
+  .sub.ok { color: var(--m-success); }
+  .bad { color: var(--m-error); }
   .hint { margin: -4px 4px 18px; font-size: 12px; color: var(--m-text-4); text-align: center; }
   .empty { padding: 40px 16px; text-align: center; font-size: 13px; color: var(--m-text-3); }
   .retry { display: block; width: 100%; background: none; border: none; font-family: inherit; color: var(--m-accent); cursor: pointer; }
