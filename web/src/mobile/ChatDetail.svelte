@@ -165,8 +165,8 @@
     <span class="t">{title}</span>
     <span class="sub">
       <span class="d" class:live={streaming}></span>
-      {streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}{` · ${ctxUsage}%`}
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      <span class="sub-text">{streaming ? $t('m.working') : $t('m.idle')}{session?.model ? ` · ${session.model}` : ''}{` · ${ctxUsage}%`}</span>
+      <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
     </span>
   </button>
   {#if $artifacts.length}
@@ -346,7 +346,9 @@
     font-size: 11px;
     color: var(--m-text-3);
   }
-  .sub .d { width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
+  .sub .sub-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub .chev { flex: none; }
+  .sub .d { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--m-text-4); }
   .sub .d.live { background: var(--m-success); }
   .scroll {
     flex: 1;
