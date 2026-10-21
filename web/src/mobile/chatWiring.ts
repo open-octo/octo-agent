@@ -8,7 +8,8 @@
 // mobile-only handler set that calls those same shared store functions.
 //
 // Deliberately omitted (desktop-only or a later batch): optimistic-send
-// bookkeeping / steer queues / rollback, sub-agent & workflow panels,
+// bookkeeping / steer queues / rollback, the floating sub-agent & workflow
+// panels (their trails do show, inside the tool cards),
 // turn-error banner, next-message suggestions. Tool groups render through the
 // desktop ToolGroup, so the tool fields set here feed the same cards. Artifacts are
 // observed into the shared store, as on desktop, and the session's artifacts
@@ -42,6 +43,9 @@ import {
   clearMsgs,
   showToast,
   uid,
+  hydrateAgentRuns,
+  recordAgentTrailEvent,
+  recordWorkflowTrailEvent,
 } from '../lib/stores'
 
 // Apply one persisted history event to the stores. A trimmed copy of the
@@ -81,6 +85,11 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
 export function loadMobileHistory(sid: string): Promise<void> {
   api.getSessionGoal(sid)
     .then(resp => chatGoal.update(m => ({ ...m, [sid]: resp?.goal ?? null })))
+    .catch(() => {})
+  // The persisted sub-agent / workflow trails, so a finished run's tool card
+  // can show what it did; an older server just leaves the card's plain result.
+  api.getAgentRuns(sid)
+    .then((resp: any) => hydrateAgentRuns(sid, resp))
     .catch(() => {})
   return api.getSessionMessages(sid).then((resp: any) => {
     const events: any[] = resp?.events ?? []
@@ -152,6 +161,26 @@ export function sendMobile(sid: string, text: string, files?: Attachment[]) {
   })
   chatStreaming.update(s => ({ ...s, [sid]: true }))
   ws.sendMessage(sid, t, files)
+}
+
+// The scrollback line for a finished sub-agent (sub_agent_notice) or
+// workflow (workflow_event done) — the desktop's wording, quoted rather than
+// backticked since mobile notices are plain text; null when there is none.
+export function agentRunNotice(ev: any): { text: string; level: 'success' | 'warning' | 'error' } | null {
+  if (ev.type === 'workflow_event') {
+    if (ev.kind !== 'done') return null
+    const label = ev.description || ev.run_id || 'workflow'
+    return ev.status === 'error'
+      ? { text: `Workflow “${label}” failed`, level: 'error' }
+      : { text: `Workflow “${label}” completed`, level: 'success' }
+  }
+  const label = ev.description || ev.agent_id || 'sub-agent'
+  switch (ev.status) {
+    case 'success': return { text: `Sub-agent “${label}” completed`, level: 'success' }
+    case 'warning': return { text: `Sub-agent “${label}” incomplete`, level: 'warning' }
+    case 'cancelled': return { text: `Sub-agent “${label}” cancelled`, level: 'warning' }
+    default: return { text: `Sub-agent “${label}” failed`, level: 'error' }
+  }
 }
 
 // The echo's attachment refs, in the shape history_user_message carries: an
@@ -275,6 +304,30 @@ export function wireMobileSession(sid: string): () => void {
     if (!forSid(ev)) return
     chatProgress.update(p => ({ ...p, [sid]: { message: ev.message || 'Thinking', phase: ev.phase } }))
     if (ev.phase === 'active') chatStreaming.update(s => ({ ...s, [sid]: true }))
+  }))
+
+  // Sub-agent and workflow progress feeds the trails ToolGroup renders inside
+  // each sub_agent / workflow tool card; a finished run also leaves a line.
+  const runNotice = (ev: any) => {
+    const n = agentRunNotice(ev)
+    if (!n) return
+    addChatMsg(sid, {
+      id: uid('note'), type: 'notice', content: n.text, level: n.level,
+      createdAt: Date.now(), streaming: false, tools: [], todos: [],
+    })
+  }
+  cleanups.push(ws.on('sub_agent_event', (ev: any) => {
+    if (!forSid(ev)) return
+    recordAgentTrailEvent(sid, ev)
+  }))
+  cleanups.push(ws.on('sub_agent_notice', (ev: any) => {
+    if (!forSid(ev)) return
+    runNotice({ ...ev, type: 'sub_agent_notice' })
+  }))
+  cleanups.push(ws.on('workflow_event', (ev: any) => {
+    if (!forSid(ev)) return
+    recordWorkflowTrailEvent(sid, ev)
+    runNotice({ ...ev, type: 'workflow_event' })
   }))
 
   // The session plan (task_create / task_update). Replayed on subscribe, so a

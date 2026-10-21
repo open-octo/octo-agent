@@ -12,8 +12,8 @@ vi.mock('../lib/ws', () => ({
   },
 }))
 
-import { chatMessages, chatStreaming, toasts } from '../lib/stores'
-import { echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
+import { agentRunTrails, chatMessages, chatStreaming, toasts } from '../lib/stores'
+import { agentRunNotice, echoRefs, insertConfirmedSteer, mobileSteers, sendMobile, wireMobileSession } from './chatWiring'
 
 describe('echoRefs', () => {
   it('maps images to their data URL and other files to a pdf: chip ref', () => {
@@ -94,10 +94,37 @@ describe('sending while a turn runs', () => {
     expect(get(mobileSteers)[sid]).toEqual([])
   })
 
+  it('feeds sub-agent trails and notes finished runs in the transcript', () => {
+    agentRunTrails.set({})
+    handlers.sub_agent_event({ session_id: sid, kind: 'started', agent_id: 'a1', description: 'scan repo' })
+    handlers.sub_agent_event({ session_id: sid, kind: 'tool', agent_id: 'a1', tool_name: 'grep' })
+    expect(get(agentRunTrails)[sid]?.subAgents.a1).toMatchObject({ description: 'scan repo', lastTool: 'grep', status: 'running' })
+    handlers.sub_agent_notice({ session_id: sid, agent_id: 'a1', description: 'scan repo', status: 'success' })
+    handlers.workflow_event({ session_id: sid, kind: 'step', run_id: 'w1' })
+    handlers.workflow_event({ session_id: sid, kind: 'done', run_id: 'w1', description: 'release', status: 'error' })
+    expect(ids().filter(x => x.startsWith('notice:'))).toEqual([
+      'notice:Sub-agent “scan repo” completed',
+      'notice:Workflow “release” failed',
+    ])
+  })
+
   it('still echoes a send made while idle as a pending bubble', () => {
     chatStreaming.set({ [sid]: false })
     sendMobile(sid, 'next')
     expect(get(mobileSteers)[sid] ?? []).toEqual([])
     expect(ids()).toEqual(['user:start', 'assistant:working on it', 'user:next'])
+  })
+})
+
+describe('agentRunNotice', () => {
+  it('words each sub-agent outcome like the desktop', () => {
+    expect(agentRunNotice({ type: 'sub_agent_notice', agent_id: 'a', status: 'warning' })).toEqual({ text: 'Sub-agent “a” incomplete', level: 'warning' })
+    expect(agentRunNotice({ type: 'sub_agent_notice', agent_id: 'a', status: 'cancelled' })?.level).toBe('warning')
+    expect(agentRunNotice({ type: 'sub_agent_notice', agent_id: 'a', status: 'boom' })?.level).toBe('error')
+  })
+
+  it('only notes a finished workflow', () => {
+    expect(agentRunNotice({ type: 'workflow_event', kind: 'step', run_id: 'w' })).toBeNull()
+    expect(agentRunNotice({ type: 'workflow_event', kind: 'done', run_id: 'w' })).toEqual({ text: 'Workflow “w” completed', level: 'success' })
   })
 })
