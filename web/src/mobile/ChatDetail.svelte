@@ -48,15 +48,15 @@
     if (sid) ws.interrupt(sid)
   }
 
-  // The session plan, as the desktop's plan card shows it: a summary with a
-  // progress bar, steps on tap. Dropped 3s after every step completes (the
-  // server doesn't replay a finished plan, so it won't come back on reopen).
   // The session goal (loaded with the history, kept live by goal_updated):
   // objective and status on one line, the whole objective on tap.
   const goal = $derived($chatGoal[sid] ?? null)
   const goalStatus = $derived(goalChip(goal))
   let goalOpen = $state(false)
 
+  // The session plan, as the desktop's plan card shows it: a summary with a
+  // progress bar, steps on tap. Dropped 3s after every step completes (the
+  // server doesn't replay a finished plan, so it won't come back on reopen).
   const todos = $derived($chatTodos[sid] ?? [])
   const planDone = $derived(todos.filter((s: any) => s.status === 'completed').length)
   let planOpen = $state(false)
