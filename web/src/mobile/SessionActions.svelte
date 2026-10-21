@@ -1,5 +1,6 @@
 <script lang="ts">
   // Bottom action sheet for one session, opened by a long press on its card.
+  import { flushSync } from 'svelte'
   import { sessions, pinnedSessions } from '../lib/stores'
   import { t } from '../lib/i18n'
   import { sessionActionsFor, togglePin, renameSession, deleteSession, copySessionMarkdown } from './sessionActions'
@@ -58,8 +59,11 @@
 
   function startRename() {
     draft = session?.name || session?.title || ''
-    mode = 'rename'
-    setTimeout(() => renameInput?.select(), 0)
+    // Render the field now and focus it inside the tap: iOS only raises the
+    // keyboard for a focus made during a user gesture.
+    flushSync(() => { mode = 'rename' })
+    renameInput?.focus()
+    renameInput?.select()
   }
 
   function saveRename() {

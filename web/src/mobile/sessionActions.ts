@@ -52,14 +52,19 @@ async function sessionMarkdown(sessionId: string, title: string): Promise<string
 // download a file, but it can fill the clipboard. The fetch runs inside the
 // clipboard write (a ClipboardItem holding a promise) so iOS, which only
 // allows a write during the tap, still accepts it once the text resolves.
+// If that write is refused, writeText gets one more try: WebViews that don't
+// tie the clipboard to the gesture (Android) can still take it then.
 export async function copySessionMarkdown(sessionId: string, title: string): Promise<void> {
   const text = sessionMarkdown(sessionId, title)
   try {
+    let written = false
     if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then(t => new Blob([t], { type: 'text/plain' })) })])
-    } else {
-      await navigator.clipboard.writeText(await text)
+      const blob = text.then(t => new Blob([t], { type: 'text/plain' }))
+      // write() may refuse before reading the item; don't leave this unhandled.
+      blob.catch(() => {})
+      written = await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]).then(() => true, () => false)
     }
+    if (!written) await navigator.clipboard.writeText(await text)
     showToast(tr('chat.copied'), 'success')
   } catch (e: any) {
     // A failed fetch or an empty session carries its own message; a refused

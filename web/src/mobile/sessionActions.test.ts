@@ -119,6 +119,22 @@ describe('copySessionMarkdown', () => {
     expect(get(toasts)[0]?.type).toBe('error')
   })
 
+  it('falls back to writeText when the ClipboardItem write is refused', async () => {
+    getSessionMessages.mockResolvedValue({ events: [{ type: 'history_user_message', content: 'hi' }] })
+    const write = vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError'))
+    writeText.mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { write, writeText }, configurable: true })
+    vi.stubGlobal('ClipboardItem', class { constructor(public items: unknown) {} })
+    try {
+      await copySessionMarkdown('a', 'T')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(write).toHaveBeenCalledOnce()
+    expect(writeText).toHaveBeenCalledWith('# T\n\n## You\n\nhi\n')
+    expect(get(toasts)[0]?.type).toBe('success')
+  })
+
   it('reports a refused clipboard', async () => {
     getSessionMessages.mockResolvedValue({ events: [{ type: 'history_user_message', content: 'hi' }] })
     writeText.mockRejectedValue(new DOMException('denied', 'NotAllowedError'))
