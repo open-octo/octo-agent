@@ -667,3 +667,43 @@ func TestDoAgentTurn_Compaction_BroadcastsReindex(t *testing.T) {
 		t.Fatalf("shifted prompt index = %d, want its persisted index %d", got, persisted)
 	}
 }
+
+// TestHandleEvent_SteerInjected_DocumentNotesBecomeChips: a steer with a
+// document attachment carries an "[Attached file: …]" note in its text. The
+// echo must strip it and add a chip ref, as the turn-start echo does — else
+// the bubble shows a raw server path and its text no longer equals what the
+// client sent, which is how clients reconcile the pending steer.
+func TestHandleEvent_SteerInjected_DocumentNotesBecomeChips(t *testing.T) {
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	srv.initWS()
+
+	const sid = "steer-doc-session"
+	seedLiveTurn(srv, sid)
+	sw := srv.newWSStreamWriter(sid)
+
+	conn := &wsConn{hub: srv.wsHub, send: make(chan []byte, 256), subscribed: map[string]struct{}{}}
+	srv.wsHub.subscribe(conn, sid)
+
+	note := agent.AttachmentNote("/home/me/.octo/uploads/1720000000000000000_spec.pdf")
+	sw.handleEvent(agent.AgentEvent{
+		Kind:  agent.EventSteerInjected,
+		Steer: []agent.InboxItem{{Text: "see attached\n\n" + note}},
+	})
+
+	var msg map[string]any
+	waitFor(t, func() bool {
+		for _, ev := range drainConn(t, conn) {
+			if ev["type"] == "history_user_message" {
+				msg = ev
+			}
+		}
+		return msg != nil
+	})
+	if got, _ := msg["content"].(string); got != "see attached" {
+		t.Errorf("content = %q, want the note stripped", got)
+	}
+	imgs, _ := msg["images"].([]any)
+	if len(imgs) != 1 || imgs[0] != "pdf:spec.pdf" {
+		t.Errorf("images = %v, want [pdf:spec.pdf]", msg["images"])
+	}
+}

@@ -2456,9 +2456,12 @@ func (w *wsStreamWriter) handleEvent(ev agent.AgentEvent) {
 		for k, it := range items {
 			// <system-reminder> blocks (background-process completion notes,
 			// recalled memories) are model-facing context, not user speech —
-			// the TUI skips them and the web transcript must too.
-			text := strings.TrimSpace(agent.StripSystemReminders(it.Text))
-			imgs := imageRefsFromBlocks(it.Blocks)
+			// the TUI skips them and the web transcript must too. Document
+			// attachments become chips with their notes stripped, as in the
+			// turn-start echo, so the bubble matches the text the client sent
+			// and a reload (which derives chips the same way) looks the same.
+			text, docRefs := docChipRefs(strings.TrimSpace(agent.StripSystemReminders(it.Text)))
+			imgs := append(imageRefsFromBlocks(it.Blocks), docRefs...)
 			if text == "" && len(imgs) == 0 {
 				continue
 			}
