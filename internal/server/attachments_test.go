@@ -163,6 +163,31 @@ func TestParseUserFiles_SkipsBadEntries(t *testing.T) {
 	}
 }
 
+// An uploads path whose base is "." or ".." (or a subdirectory) names no
+// uploaded file and must not resolve to the uploads dir or its parent.
+func TestParseUserFiles_PathOutsideUploads(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	dir, err := ensureUploadsDir()
+	if err != nil {
+		t.Fatalf("uploads dir: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	att := parseUserFiles([]wsUserFile{
+		{Name: "a", Path: "/api/uploads/.."},
+		{Name: "b", Path: "/api/uploads/."},
+		{Name: "c", Path: "/api/uploads/"},
+		{Name: "d", Path: "/api/uploads/sub"},
+	}, false, true)
+	if len(att.notes) != 0 || len(att.failed) != 4 {
+		t.Errorf("notes=%v failed=%v, want no notes and 4 failures", att.notes, att.failed)
+	}
+}
+
 // A persisted image attachment note for a non-vision model must replay as a
 // thumbnail ref (/api/uploads/<name>) rather than a pdf: document chip.
 func TestHandleGetSessionMessages_ImageAttachmentReplay(t *testing.T) {

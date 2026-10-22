@@ -169,16 +169,34 @@ func parseUserFiles(files []wsUserFile, allowLocalPath, sendImageBlocks bool) us
 			}
 			// The composer sends back the /api/uploads/<name> URL that
 			// POST /api/upload returned; map it to the file on disk.
-			abs := filepath.Join(dir, filepath.Base(f.Path))
-			if _, err := os.Stat(abs); err != nil {
-				log.Printf("[ws] file attachment %q: %v", f.Name, err)
+			name, ok := uploadedFileName(dir, filepath.Base(f.Path))
+			if !ok {
+				log.Printf("[ws] file attachment %q: not in uploads", f.Name)
 				att.failed = append(att.failed, cmp.Or(f.Name, "attachment"))
 				continue
 			}
-			att.notes = append(att.notes, agent.AttachmentNote(abs))
+			att.notes = append(att.notes, agent.AttachmentNote(filepath.Join(dir, name)))
 		}
 	}
 	return att
+}
+
+// uploadedFileName returns the uploads directory's own entry named want, so
+// the path built from it comes from the directory listing rather than the
+// client. filepath.Base leaves "." and "..", which joined to the dir would
+// name the uploads dir or its parent; a listing never contains either, and
+// only regular files match.
+func uploadedFileName(dir, want string) (string, bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if e.Type().IsRegular() && e.Name() == want {
+			return e.Name(), true
+		}
+	}
+	return "", false
 }
 
 // saveImageAttachment decodes a base64 data URL, persists the bytes under
