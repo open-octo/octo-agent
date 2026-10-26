@@ -225,8 +225,6 @@ var Registry = []Vendor{
 			{ID: "k3.1-pro-highspeed", Vision: true},
 			{ID: "k3", Vision: true},
 			{ID: "k3-256k", Vision: true},
-			{ID: "kimi-k2.6", Vision: true},
-			{ID: "kimi-k2.7-code", Vision: true},
 		},
 		APIKeyEnvVar: "MOONSHOT_API_KEY",
 		WebsiteURL:   "https://platform.moonshot.cn/console/api-keys",

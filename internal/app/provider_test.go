@@ -272,11 +272,13 @@ func TestVendorModelVision(t *testing.T) {
 		{"kimi", "k3", true, true},              // MoonViT multimodal
 		{"kimi", "kimi-k3.1-pro", true, true},
 		{"kimi-coding-plan", "k3.1-pro-highspeed", true, true},
-		{"kimi", "kimi-k2.6", false, false},      // dropped from the catalogue
-		{"kimi", "kimi-k2.7-code", false, false}, // dropped from the catalogue
-		{"glm", "glm-5.3", false, true},          // text-only
-		{"glm", "glm-5.3-flash", true, true},     // image/video/file input
-		{"openai", "o3-mini", false, true},       // no image input
+		{"kimi", "kimi-k2.6", false, false},                  // dropped from the catalogue
+		{"kimi", "kimi-k2.7-code", false, false},             // dropped from the catalogue
+		{"kimi-coding-plan", "kimi-k2.6", false, false},      // dropped from the catalogue
+		{"kimi-coding-plan", "kimi-k2.7-code", false, false}, // dropped from the catalogue
+		{"glm", "glm-5.3", false, true},                      // text-only
+		{"glm", "glm-5.3-flash", true, true},                 // image/video/file input
+		{"openai", "o3-mini", false, true},                   // no image input
 		{"openai", "o4-mini", true, true},
 		{"xai", "grok-4.5", true, true},
 		{"xai", "grok-4.20", true, true},
