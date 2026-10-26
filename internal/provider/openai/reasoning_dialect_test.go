@@ -204,6 +204,25 @@ func TestKimiDialect_ModelDependentShape(t *testing.T) {
 			}
 		}
 	})
+
+	// k3.1 always reasons and 400s on the "disabled" toggle, so "off" is
+	// its lightest effort instead.
+	t.Run("k3.1 off sends reasoning_effort=low", func(t *testing.T) {
+		for _, stream := range []bool{false, true} {
+			on := captureRequestModel(t, DialectKimi, "kimi-k3.1-pro", "high", stream)
+			if on.ReasoningEffort != "max" {
+				t.Errorf("stream=%v: reasoning_effort = %q, want max", stream, on.ReasoningEffort)
+			}
+
+			off := captureRequestModel(t, DialectKimi, "kimi-k3.1-pro", "", stream)
+			if off.ReasoningEffort != "low" {
+				t.Errorf("stream=%v: off reasoning_effort = %q, want low", stream, off.ReasoningEffort)
+			}
+			if off.Thinking != nil {
+				t.Errorf("stream=%v: off thinking = %+v, want omitted (k3.1 rejects disabled)", stream, off.Thinking)
+			}
+		}
+	})
 }
 
 // A generic (unknown) backend must never see the thinking toggle, and tops out

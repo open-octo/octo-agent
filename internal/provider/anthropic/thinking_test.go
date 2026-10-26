@@ -155,13 +155,15 @@ func TestSend_ThinkingBlock_RoundTrips(t *testing.T) {
 // reasoning" (ThinkingBudget 0) per backend family: a non-Claude model gets an
 // explicit `"thinking":{"type":"disabled"}` with no budget_tokens key (the
 // omitempty must actually drop it), a legacy Claude model gets no thinking key
-// at all, and an adaptive Claude model likewise — it would 400 on "disabled".
+// at all, and an adaptive Claude model likewise — it would 400 on "disabled",
+// as would Kimi k3.1, which can't turn thinking off.
 func TestSendStream_ReasoningOff_WireBody(t *testing.T) {
 	cases := []struct {
 		model        string
 		wantDisabled bool
 	}{
 		{"k3", true},
+		{"k3.1-pro", false},
 		{"deepseek-flash", true},
 		{"claude-haiku-4-5", false},
 		{"claude-fable-5", false},
@@ -193,7 +195,7 @@ func TestSendStream_ReasoningOff_WireBody(t *testing.T) {
 				t.Errorf("thinking disabled on wire = %v, want %v; body: %s", hasDisabled, tc.wantDisabled, raw)
 			}
 			if !tc.wantDisabled && strings.Contains(raw, `"thinking"`) {
-				t.Errorf("Claude model must not carry a thinking key; body: %s", raw)
+				t.Errorf("model must not carry a thinking key; body: %s", raw)
 			}
 			if strings.Contains(raw, "budget_tokens") {
 				t.Errorf("budget_tokens must be omitted when reasoning is off; body: %s", raw)

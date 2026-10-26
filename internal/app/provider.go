@@ -201,6 +201,8 @@ var Registry = []Vendor{
 		// Kimi's k3 is natively multimodal (image input via MoonViT).
 		Models: []VendorModel{
 			{ID: "k3", Vision: true},
+			{ID: "kimi-k3.1-pro", Vision: true},
+			{ID: "kimi-k3.1-pro-highspeed", Vision: true},
 		},
 		APIKeyEnvVar: "MOONSHOT_API_KEY",
 		WebsiteURL:   "https://platform.moonshot.cn/console/api-keys",
@@ -219,6 +221,8 @@ var Registry = []Vendor{
 		Models: []VendorModel{
 			{ID: "kimi-for-coding", Vision: true},
 			{ID: "kimi-for-coding-highspeed", Vision: true},
+			{ID: "k3.1-pro", Vision: true},
+			{ID: "k3.1-pro-highspeed", Vision: true},
 			{ID: "k3", Vision: true},
 			{ID: "k3-256k", Vision: true},
 			{ID: "kimi-k2.6", Vision: true},

@@ -400,7 +400,9 @@ func applyReasoning(body *apiRequest, model, effort string, budget int) {
 	// Legacy budget_tokens path (older Claude, Kimi-for-coding): triggered by a
 	// positive budget, independent of the effort string.
 	if budget <= 0 {
-		if thinksWhenUnspecified(model) {
+		// Kimi k3.1 can't turn thinking off and answers "disabled" with a
+		// 400, so it is left to its server default.
+		if thinksWhenUnspecified(model) && !strings.Contains(strings.ToLower(model), "k3.1") {
 			body.Thinking = &apiThinking{Type: "disabled"}
 		}
 		return

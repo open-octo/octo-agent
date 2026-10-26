@@ -68,6 +68,8 @@ const DialectBailian = "bailian"
 //     unsupported value. Reasoning is on by default, so "off" must be sent
 //     as the nested {type: "disabled"} toggle (which k3 also accepts) —
 //     omitting both fields leaves it reasoning.
+//   - k3.1: always reasons and rejects the "disabled" toggle with a 400, so
+//     "off" is sent as reasoning_effort "low", its lightest level.
 //   - any other kimi model: the same nested {type: "enabled"|"disabled"}
 //     toggle as DeepSeek — no reasoning_effort field.
 //
@@ -145,7 +147,8 @@ type Client struct {
 //     per-model defaults vary.
 //   - Kimi: model-dependent (see DialectKimi) — k3 gets a top-level
 //     reasoning_effort clamped to its only supported value, "max", or the
-//     nested toggle set to "disabled" when effort is ""; every other kimi
+//     nested toggle set to "disabled" when effort is "" (k3.1, which can't
+//     turn reasoning off, gets reasoning_effort "low" instead); every other kimi
 //     model gets the same nested toggle as DeepSeek with no reasoning_effort.
 //   - Generic OpenAI-compatible: top out at "high" and reject unknown enums, so
 //     both "xhigh" and "max" clamp to "high"; "thinking" is never sent.
@@ -177,9 +180,12 @@ func (c *Client) applyReasoning(body *apiRequest, effort string) {
 		m := strings.ToLower(body.Model)
 		switch {
 		case strings.Contains(m, "k3"):
-			if effort != "" {
+			switch {
+			case effort != "":
 				body.ReasoningEffort = "max"
-			} else {
+			case strings.Contains(m, "k3.1"):
+				body.ReasoningEffort = "low"
+			default:
 				body.Thinking = &apiThinking{Type: "disabled"}
 			}
 		default: // any non-k3 kimi model
