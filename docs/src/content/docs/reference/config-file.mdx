@@ -163,9 +163,19 @@ tools:
     enabled: auto          # auto (default) | on | off
     threshold_pct: 10
   disabled_skills: []
+  sub_agent_max_concurrency: 16   # 0 or unset = built-in default (16)
+  web_max_concurrency: 0          # 0 or unset = unlimited
 ```
 
 `disabled_skills` hides listed skills from the model and the UI without deleting them from disk.
+
+`sub_agent_max_concurrency` caps how many sub-agents one session runs at once. Extra foreground
+sub-agents wait for a slot; extra background ones are refused so the model waits for some to finish.
+A change applies to sessions started afterwards.
+
+`web_max_concurrency` caps how many `web_fetch` / `web_search` calls run at once across the whole
+process, sub-agents included. Extra calls wait for a slot, and a call's timeout starts only once it
+has one. Set it when a wide fan-out of sub-agents makes pages time out or come back incomplete.
 See [Connect MCP servers](/docs/guides/connect-mcp-servers/) for what `tool_search` does.
 
 ## Browser block

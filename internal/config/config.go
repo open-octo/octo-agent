@@ -609,6 +609,12 @@ type ToolsConfig struct {
 	// are hidden from the model (not injected into the system prompt) and from
 	// the UI, but remain on disk.
 	DisabledSkills []string `yaml:"disabled_skills,omitempty"`
+	// SubAgentMaxConcurrency caps how many sub-agents one session runs at
+	// once. Zero means the built-in default (16).
+	SubAgentMaxConcurrency int `yaml:"sub_agent_max_concurrency,omitempty"`
+	// WebMaxConcurrency caps how many web_fetch / web_search calls run at once
+	// across the whole process, sub-agents included. Zero means unlimited.
+	WebMaxConcurrency int `yaml:"web_max_concurrency,omitempty"`
 }
 
 // ToolSearchConfig mirrors the documented tools.tool_search block. Empty fields
@@ -750,6 +756,12 @@ func (c Config) Validate() []string {
 	}
 	if pct := c.Tools.ToolSearch.ThresholdPct; pct < 0 || pct > 100 {
 		problems = append(problems, fmt.Sprintf("tools.tool_search.threshold_pct %d is out of range (0–100; 0 means the built-in default)", pct))
+	}
+	if n := c.Tools.SubAgentMaxConcurrency; n < 0 || n > maxRateLimitValue {
+		problems = append(problems, fmt.Sprintf("tools.sub_agent_max_concurrency %d is out of range (0–%d; 0 means the built-in default)", n, maxRateLimitValue))
+	}
+	if n := c.Tools.WebMaxConcurrency; n < 0 || n > maxRateLimitValue {
+		problems = append(problems, fmt.Sprintf("tools.web_max_concurrency %d is out of range (0–%d; 0 means unlimited)", n, maxRateLimitValue))
 	}
 	// memory_backend: an empty Type disables the feature (nothing to check).
 	// When set, Type must be a known backend and base_url is required — except

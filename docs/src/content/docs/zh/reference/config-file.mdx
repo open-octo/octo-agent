@@ -146,10 +146,18 @@ tools:
     enabled: auto          # auto（默认）| on | off
     threshold_pct: 10
   disabled_skills: []
+  sub_agent_max_concurrency: 16   # 0 或不填 = 内置默认值（16）
+  web_max_concurrency: 0          # 0 或不填 = 不限制
 ```
 
 `disabled_skills` 会把列出的 skill 从模型和 UI 里隐藏，但不会从磁盘删除。`tool_search`
 的作用见[接入 MCP 服务](/docs/zh/guides/connect-mcp-servers/)。
+
+`sub_agent_max_concurrency` 限制一个会话里同时运行的子 Agent 数量。超出的前台子 Agent 会排队等空位，
+超出的后台子 Agent 会被拒绝，让模型等前面的跑完再派。改了之后，新开的会话才生效。
+
+`web_max_concurrency` 限制整个进程里同时进行的 `web_fetch` / `web_search` 调用数，子 Agent 发出的也算在内。
+超出的调用排队等空位，单次调用的超时从拿到空位才开始算。子 Agent 并行太多、网页经常超时或读不全时，可以设上它。
 
 ## Browser 配置块
 

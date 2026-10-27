@@ -32,6 +32,29 @@ func (s *resultSpawner) Continue(_ context.Context, _, _ string) (SpawnResult, e
 	return SpawnResult{}, nil
 }
 
+func TestSubAgentManager_ConcurrencyCapFromConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	if got := NewSubAgentManager(&resultSpawner{}).maxConcurrent; got != defaultMaxConcurrentSubAgents {
+		t.Errorf("unset: cap = %d, want the default %d", got, defaultMaxConcurrentSubAgents)
+	}
+
+	writeCfg(t, "tools:\n  sub_agent_max_concurrency: 3\n")
+	sp := &blockingSpawner{release: make(chan struct{})}
+	defer close(sp.release)
+	mgr := NewSubAgentManager(sp)
+	for i := 0; i < 3; i++ {
+		if _, err := mgr.Start(SpawnRequest{Description: "x"}); err != nil {
+			t.Fatalf("start %d (within the configured cap) should succeed: %v", i, err)
+		}
+	}
+	if _, err := mgr.Start(SpawnRequest{Description: "over"}); err == nil || !strings.Contains(err.Error(), "3/3") {
+		t.Errorf("start past the configured cap: want a 3/3 refusal, got %v", err)
+	}
+}
+
 // TestSubAgentManager_ConcurrencyCap verifies async spawns are bounded: the
 // cap-th+1 launch is rejected while the others are running, and a slot frees up
 // once one finishes.
@@ -39,7 +62,7 @@ func TestSubAgentManager_ConcurrencyCap(t *testing.T) {
 	sp := &blockingSpawner{release: make(chan struct{})}
 	mgr := NewSubAgentManager(sp) // async
 
-	for i := 0; i < maxConcurrentSubAgents; i++ {
+	for i := 0; i < mgr.maxConcurrent; i++ {
 		if _, err := mgr.Start(SpawnRequest{Description: "x"}); err != nil {
 			t.Fatalf("start %d (within cap) should succeed: %v", i, err)
 		}
@@ -104,7 +127,7 @@ func TestAgentTool_FanOutPastCapIsRefused(t *testing.T) {
 	ctx := WithSubAgentManager(context.Background(), mgr)
 	args := map[string]any{"description": "d", "prompt": "p", "subagent_type": "general"}
 
-	for i := 0; i < maxConcurrentSubAgents; i++ {
+	for i := 0; i < mgr.maxConcurrent; i++ {
 		if _, err := (AgentTool{}).Execute(ctx, "sub_agent", args); err != nil {
 			t.Fatalf("dispatch %d is within the cap and should succeed: %v", i, err)
 		}

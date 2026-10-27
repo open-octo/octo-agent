@@ -189,6 +189,12 @@ func (WebSearchTool) Execute(ctx context.Context, _ string, input map[string]any
 		max = WebSearchHardMax
 	}
 
+	release, err := acquireWebSlot(ctx)
+	if err != nil {
+		return agent.ToolResult{}, fmt.Errorf("web_search: %w", err)
+	}
+	defer release()
+
 	// Run backends in priority order, accumulating the last error so we
 	// can surface SOMETHING if every backend fails.
 	var (

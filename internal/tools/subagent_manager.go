@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-octo/octo-agent/internal/config"
 	"github.com/open-octo/octo-agent/internal/panics"
 )
 
@@ -179,13 +180,23 @@ func subAgentManagerEnabled() bool {
 	return defaultSubAgentMgr != nil
 }
 
-// maxConcurrentSubAgents caps how many async sub-agents may run at once, so a
-// model that fires off a large fan-out in one round can't spawn an unbounded
-// number of concurrent agent loops (each making API calls).
+// defaultMaxConcurrentSubAgents caps how many async sub-agents may run at
+// once, so a model that fires off a large fan-out in one round can't spawn an
+// unbounded number of concurrent agent loops (each making API calls).
 // New spawns past the cap are rejected with a clear error so the model waits
 // for some to finish; it does not bound resumed (Send/Continue) rounds, which
-// are limited by the live-child cap.
-const maxConcurrentSubAgents = 16
+// are limited by the live-child cap. tools.sub_agent_max_concurrency
+// overrides it.
+const defaultMaxConcurrentSubAgents = 16
+
+// maxConcurrentSubAgents resolves the configured sub-agent cap.
+func maxConcurrentSubAgents() int {
+	cfg, _ := config.LoadCached()
+	if n := cfg.Tools.SubAgentMaxConcurrency; n > 0 {
+		return n
+	}
+	return defaultMaxConcurrentSubAgents
+}
 
 // SubAgentManager owns the set of async sub-agents for a session.
 // Methods are safe for concurrent use.
@@ -198,24 +209,29 @@ type SubAgentManager struct {
 	onEvent     func(SubAgentEvent)
 	synchronous bool
 	activeAsync int // running async spawns, for the concurrency cap
+	// maxConcurrent is the cap for both activeAsync and syncSem, read once at
+	// construction so the two gates always agree.
+	maxConcurrent int
 
 	// syncSem bounds how many synchronous (RunSync) sub-agents run at once. A
 	// single assistant turn can dispatch a whole batch of foreground sub_agent
 	// calls, and dispatchTools now runs them concurrently — without this a large
 	// fan-out would open an unbounded number of child agent loops (and provider
 	// connections) at once. Excess RunSync calls block here until a slot frees,
-	// mirroring the maxConcurrentSubAgents guard the async Start path enforces by
-	// rejection. Buffered to maxConcurrentSubAgents; nil-safe is not required
+	// mirroring the maxConcurrent guard the async Start path enforces by
+	// rejection. Buffered to maxConcurrent; nil-safe is not required
 	// since NewSubAgentManager always sets it.
 	syncSem chan struct{}
 }
 
 // NewSubAgentManager returns an empty manager.
 func NewSubAgentManager(spawner Spawner) *SubAgentManager {
+	limit := maxConcurrentSubAgents()
 	return &SubAgentManager{
-		agents:  map[string]*asyncSubAgent{},
-		spawner: spawner,
-		syncSem: make(chan struct{}, maxConcurrentSubAgents),
+		agents:        map[string]*asyncSubAgent{},
+		spawner:       spawner,
+		maxConcurrent: limit,
+		syncSem:       make(chan struct{}, limit),
 	}
 }
 
@@ -488,11 +504,11 @@ func (m *SubAgentManager) Start(req SpawnRequest) (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m.mu.Lock()
-	if m.activeAsync >= maxConcurrentSubAgents {
+	if m.activeAsync >= m.maxConcurrent {
 		n := m.activeAsync // read under the lock; don't touch m.activeAsync after Unlock
 		m.mu.Unlock()
 		cancel()
-		return "", fmt.Errorf("too many sub-agents running (%d/%d) — wait for some to finish (you'll be notified) before launching more", n, maxConcurrentSubAgents)
+		return "", fmt.Errorf("too many sub-agents running (%d/%d) — wait for some to finish (you'll be notified) before launching more", n, m.maxConcurrent)
 	}
 	m.activeAsync++
 	m.seq++

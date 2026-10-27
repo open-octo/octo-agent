@@ -118,6 +118,14 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 		clean = v
 	}
 
+	// Wait for a slot before starting the timeout, so time spent queued
+	// behind other fetches doesn't eat into this one's budget.
+	release, err := acquireWebSlot(ctx)
+	if err != nil {
+		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", err)
+	}
+	defer release()
+
 	// fetchDirect supplies a same-origin Referer and a browser UA by default;
 	// explicit overrides are passed through when the caller needs to clear a
 	// hotlink/anti-bot 403/404.
