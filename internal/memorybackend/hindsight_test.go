@@ -43,6 +43,9 @@ func TestHindsightStore(t *testing.T) {
 	if item["content"] != "hello world" {
 		t.Errorf("item content = %v, want %q", item["content"], "hello world")
 	}
+	if gotBody["async"] != true {
+		t.Errorf("body async = %v, want true", gotBody["async"])
+	}
 }
 
 func TestHindsightStoreNoAPIKeyOmitsAuthHeader(t *testing.T) {

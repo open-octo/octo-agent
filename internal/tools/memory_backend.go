@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -115,7 +116,7 @@ func (MemoryRecallTool) Execute(ctx context.Context, _ string, input map[string]
 // RegisterInProc always run synchronously (only shell hooks support the
 // async flag), so the store itself is dispatched in its own goroutine with a
 // context decoupled from the turn's — that context may already be cancelled
-// by the time this fires. Store errors are swallowed: a background hook has
+// by the time this fires. Store errors are only logged: a background hook has
 // no tool_result channel to surface them to the agent, and store is
 // best-effort by design (see the memory-backend design plan).
 //
@@ -151,7 +152,9 @@ func RegisterMemoryBackendHooks(e *hooks.Engine) {
 			defer func() { _ = panics.Error(recover(), "memory backend store") }()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			_ = b.Store(ctx, content)
+			if err := b.Store(ctx, content); err != nil {
+				slog.Warn("memory backend: store failed", "backend", b.Name(), "err", err)
+			}
 		}()
 		return ""
 	})

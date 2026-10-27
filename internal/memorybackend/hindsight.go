@@ -69,8 +69,13 @@ func (b *hindsightBackend) do(ctx context.Context, url string, body any, out any
 }
 
 func (b *hindsightBackend) Store(ctx context.Context, content string) error {
+	// A synchronous retain blocks until the server's LLM fact extraction
+	// finishes, which can outlast the caller's store timeout on
+	// self-hosted deployments (#2709). Nothing reads the sync-only response
+	// fields, so queue the work and return immediately.
 	body := map[string]any{
 		"items": []map[string]any{{"content": content}},
+		"async": true,
 	}
 	return b.do(ctx, b.bankURL("/memories"), body, nil)
 }
