@@ -18,6 +18,8 @@ Path: `~/.octo/config.yml`. Every field is optional — a missing file or field 
 | `browser.connect_port` / `browser.attach_running` | int / bool | Chrome connection settings — see `octo browser setup` |
 | `memory_backend` | object | Optional external semantic memory (hindsight/mem0/agentmemory) — see `MEMORY.md` |
 | `tools.tool_search` | object | MCP Tool Search settings — see `MCP.md` |
+| `tools.sub_agent_max_concurrency` | int | Sub-agents one session runs at once, counted separately for foreground and background; 0/unset = 16 |
+| `tools.web_max_concurrency` | int | `web_fetch` + `web_search` calls in flight across the whole process; 0/unset = unlimited. Lower it when a wide sub-agent fan-out makes pages time out |
 
 ## Example
 

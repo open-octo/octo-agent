@@ -69,7 +69,8 @@ message, `--prompt-file`, or piped stdin) has no later turn for a notification t
 runs the child inline and hands the reply straight back.
 
 When the model issues several `sub_agent` calls in one round, they fan out **concurrently** (capped
-at 16 in flight) instead of running one after another; past that cap a spawn is refused and the
+at 16 in flight by default; see `tools.sub_agent_max_concurrency` in the
+[config file reference](/docs/reference/config-file/#tools-block)) instead of running one after another; past that cap a spawn is refused and the
 model waits for a slot to free up. A sub-agent that finishes without being killed stays
 addressable:
 

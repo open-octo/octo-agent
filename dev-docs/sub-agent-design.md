@@ -196,7 +196,7 @@ child.MaxTurns = childMaxTurns              // child 专属 loop 预算
 - **`Send(agentID, msg)`**:起 goroutine 跑 `Continue`,立即返回。
 - **busy / pending 队列**:一个子 agent 同时只处理一个请求。`Send` 时它 busy 则存进 `pending`(深度
   1);已有 pending 则报 `already has a pending message`;当前请求结束后自动发 pending。
-- **并发上限**:`maxConcurrentSubAgents`(16)限制同时在跑的 async spawn——模型一次 fan-out 一大批
+- **并发上限**:`maxConcurrentSubAgents()`(默认 16,`tools.sub_agent_max_concurrency` 可调,manager 构造时读一次)限制同时在跑的 async spawn——模型一次 fan-out 一大批
   也不会起无界个并发 agent loop。超限的新 spawn 被明确**拒绝**(让模型等):异步下父回合没有被占住,
   模型收到这条错误可以先做别的、等通知回来再补派。对照同步路径的 `syncSem` 是阻塞排队,
   续话(`Send`/`Continue`)轮不计入此上限(受 live-child 上限约束)。`activeAsync` 在 manager 锁下
