@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -52,5 +54,30 @@ func TestAcquireWebSlot_ZeroIsUnlimited(t *testing.T) {
 			t.Fatalf("slot %d: unlimited should never wait, got %v", i, err)
 		}
 		defer release()
+	}
+}
+
+func TestWebFetch_WaitsForWebSlot(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	writeCfg(t, "tools:\n  web_max_concurrency: 1\n")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	release, err := acquireWebSlot(context.Background())
+	if err != nil {
+		t.Fatalf("hold the only slot: %v", err)
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err = (WebFetchTool{}).Execute(ctx, "web_fetch", map[string]any{"url": srv.URL})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("web_fetch with the only slot taken: want it to wait until the deadline, got err=%v", err)
 	}
 }
