@@ -11,16 +11,16 @@
     "wire-native": "node scripts/wire-native.mjs"
   },
   "dependencies": {
-    "@capacitor/core": "^8.5.1",
+    "@capacitor/core": "^8.5.3",
     "jsqr": "^1.4.0"
   },
   "devDependencies": {
     "@capacitor/android": "^8.5.3",
-    "@capacitor/cli": "^8.5.1",
+    "@capacitor/cli": "^8.5.3",
     "@capacitor/ios": "^8.5.3",
     "esbuild": "^0.28.2",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   },
   "overrides": {
     "uuid": "^11.1.1"
