@@ -120,6 +120,88 @@ describe('terminal command block', () => {
   })
 })
 
+// #2723: the header ellipsizes arguments and keeps the full text only in a
+// hover title, which touch screens never show.
+describe('full arguments block', () => {
+  const MCP_ARGS = { text: 'echo ' + 'x'.repeat(200), vm_name: 'G8_MBR_grub197' }
+
+  it('shows an MCP call\'s full arguments above its result', () => {
+    const el = render([tool({ name: 'mcp__serencp__exec', args: MCP_ARGS, result: '{"success":true}' })])
+    const args = el.querySelector('.args-block .args-text')
+    expect(args?.textContent).toBe(JSON.stringify(MCP_ARGS, null, 2))
+    const body = el.querySelector('.tool-body-inner')!
+    expect(body.firstElementChild?.classList.contains('args-block')).toBe(true)
+    expect(el.querySelector('.tool-output')?.textContent).toContain('"success": true')
+  })
+
+  it('accepts args as a JSON string', () => {
+    const el = render([tool({ name: 'read_file', args: JSON.stringify({ path: '/tmp/a.txt' }) })])
+    expect(el.querySelector('.args-text')?.textContent).toBe('{\n  "path": "/tmp/a.txt"\n}')
+  })
+
+  it('shows the arguments while the call is running and when it errored', () => {
+    expect(render([tool({ name: 'web_fetch', args: { url: 'https://a.b' }, done: false })])
+      .querySelector('.args-text')).not.toBeNull()
+    unmount(app!); app = null
+    expect(render([tool({ name: 'web_fetch', args: { url: 'https://a.b' }, error: 'boom' })])
+      .querySelector('.args-text')).not.toBeNull()
+  })
+
+  it('renders nothing for empty arguments', () => {
+    for (const args of [{}, [], null, '']) {
+      expect(render([tool({ name: 'mcp__x__list', args })]).querySelector('.args-block'), JSON.stringify(args)).toBeNull()
+      unmount(app!); app = null
+    }
+  })
+
+  it('is skipped when the rendered body already shows the input', () => {
+    const cases = [
+      tool({ name: 'terminal', args: { command: 'ls' } }),
+      tool({ name: 'todo_write', args: { todos: [{ status: 'pending', content: 'x' }] } }),
+      tool({ name: 'edit_file', args: { path: 'a' }, ui_payload: { diff: '@@' } }),
+      tool({ name: 'write_file', args: { path: 'a', content: 'x' }, ui_payload: { preview: 'x' } }),
+      tool({ name: 'render_ui', args: { spec: {} }, ui_payload: { spec: { type: 'text' } } }),
+    ]
+    for (const c of cases) {
+      expect(render([c]).querySelector('.args-block'), c.name as string).toBeNull()
+      unmount(app!); app = null
+    }
+  })
+
+  // Trails show the sub-agent's steps, never its prompt or the workflow script.
+  it('shows the prompt of a sub_agent and the script of a workflow', () => {
+    for (const name of ['sub_agent', 'workflow']) {
+      expect(render([tool({ name, args: { prompt: 'p'.repeat(300) } })]).querySelector('.args-text'), name).not.toBeNull()
+      unmount(app!); app = null
+    }
+  })
+
+  it('still shows the input when a body falls back to the plain result', () => {
+    expect(render([tool({ name: 'write_file', args: { path: 'a' }, error: 'denied' })])
+      .querySelector('.args-text')).not.toBeNull()
+    unmount(app!); app = null
+    expect(render([tool({ name: 'todo_write', args: '{not json', result: 'ok' })])
+      .querySelector('.args-text')).not.toBeNull()
+  })
+
+  it('copies the arguments and acknowledges it', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true, writable: true })
+    try {
+      const el = render([tool({ name: 'mcp__x__exec', args: { text: 'hi' } })])
+      const btn = el.querySelector('.args-block .cmd-copy') as HTMLButtonElement
+      expect(btn.getAttribute('aria-label')).toBe('Copy arguments')
+      btn.click()
+      await Promise.resolve(); await Promise.resolve()
+      expect(writeText).toHaveBeenCalledWith('{\n  "text": "hi"\n}')
+      await new Promise((r) => setTimeout(r, 0))
+      expect(btn.getAttribute('aria-label')).toBe('Copied')
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+})
+
 // jsdom ships no navigator.clipboard at all, which is also what a browser
 // hands a page served over plain HTTP — so the failure path is the real
 // out-of-the-box state, not a contrived one.
