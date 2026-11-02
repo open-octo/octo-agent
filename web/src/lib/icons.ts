@@ -37,7 +37,7 @@ export function initIcons(): void {
 // opt-out is a per-element `noobserver` attribute; patching the one method
 // that honours it covers icons in templates and in rendered markdown alike.
 // An icon with no observer stays `_visible = true`, i.e. always renders.
-export function disableVisibilityObservers(): void {
+function disableVisibilityObservers(): void {
   const el = customElements.get('iconify-icon') as { prototype: { startObserver?: () => void } } | undefined
   if (el && typeof el.prototype.startObserver === 'function') {
     el.prototype.startObserver = () => {}
