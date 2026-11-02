@@ -120,6 +120,48 @@ describe('terminal command block', () => {
   })
 })
 
+// #2723: the header ellipsizes arguments and keeps the full text only in a
+// hover title, which touch screens never show.
+describe('full arguments block', () => {
+  const MCP_ARGS = { text: 'echo ' + 'x'.repeat(200), vm_name: 'G8_MBR_grub197' }
+
+  it('shows an MCP call\'s full arguments above its result', () => {
+    const el = render([tool({ name: 'mcp__serencp__exec', args: MCP_ARGS, result: '{"success":true}' })])
+    const args = el.querySelector('.args-block .args-text')
+    expect(args?.textContent).toBe(JSON.stringify(MCP_ARGS, null, 2))
+    const body = el.querySelector('.tool-body-inner')!
+    expect(body.firstElementChild?.classList.contains('args-block')).toBe(true)
+    expect(el.querySelector('.tool-output')?.textContent).toContain('"success": true')
+  })
+
+  it('accepts args as a JSON string', () => {
+    const el = render([tool({ name: 'read_file', args: JSON.stringify({ path: '/tmp/a.txt' }) })])
+    expect(el.querySelector('.args-text')?.textContent).toBe('{\n  "path": "/tmp/a.txt"\n}')
+  })
+
+  it('shows the arguments while the call is running and when it errored', () => {
+    expect(render([tool({ name: 'web_fetch', args: { url: 'https://a.b' }, done: false })])
+      .querySelector('.args-text')).not.toBeNull()
+    unmount(app!); app = null
+    expect(render([tool({ name: 'web_fetch', args: { url: 'https://a.b' }, error: 'boom' })])
+      .querySelector('.args-text')).not.toBeNull()
+  })
+
+  it('renders nothing for empty arguments', () => {
+    expect(render([tool({ name: 'mcp__x__list', args: {} })]).querySelector('.args-block')).toBeNull()
+  })
+
+  it('is skipped for tools whose body already shows their input', () => {
+    for (const name of ['terminal', 'todo_write', 'sub_agent', 'workflow', 'render_ui', 'write_file']) {
+      const el = render([tool({ name, args: { a: 1 } })])
+      expect(el.querySelector('.args-block'), name).toBeNull()
+      unmount(app!); app = null
+    }
+    expect(render([tool({ name: 'edit_file', args: { path: 'a' }, ui_payload: { diff: '@@' } })])
+      .querySelector('.args-block')).toBeNull()
+  })
+})
+
 // jsdom ships no navigator.clipboard at all, which is also what a browser
 // hands a page served over plain HTTP — so the failure path is the real
 // out-of-the-box state, not a contrived one.

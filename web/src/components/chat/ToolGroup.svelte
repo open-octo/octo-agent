@@ -348,6 +348,19 @@
     return tool.args ? argSummary(tool.name, tool.args) : ''
   }
 
+  // The header shows arguments on one ellipsized line, with the whole text only
+  // in a hover `title` — which touch screens never show, so an MCP call's input
+  // was unreadable on a phone (#2723). Expanding a card now prints the full
+  // arguments above the result. Skipped for tools whose body already presents
+  // their input (terminal's command block, todo checklist, edit diff, write
+  // preview, sub-agent/workflow trails, rendered UI).
+  const ARGS_SHOWN_BY_BODY = new Set(['terminal', 'bash', 'todo_write', 'todowrite', 'sub_agent', 'workflow', 'render_ui', 'write_file'])
+  function fullArgs(tool: any): string {
+    if (ARGS_SHOWN_BY_BODY.has(tool.name) || tool.ui_payload?.diff) return ''
+    const text = prettyResult(tool.args).trim()
+    return text === '{}' || text === '[]' ? '' : text
+  }
+
   // A non-zero exit is not a tool error either — terminal reports it via the
   // structured ui_payload.status rather than tool.error, and appends a
   // trailing "[exit: …]" marker to the output (internal/tools/terminal.go).
@@ -493,6 +506,7 @@
       {@const fErr = fetchError(tool)}
       {@const tErr = terminalFailure(tool)}
       {@const cmdText = terminalCommand(tool)}
+      {@const argsText = fullArgs(tool)}
       <!-- Full arg text lives in the DOM either way — the CSS only visually
            ellipsizes it. `title` surfaces the whole thing despite the
            truncation; the header itself is click-to-fold, not selectable. -->
@@ -570,6 +584,21 @@
               title={copyLabel}
               aria-label={copyLabel}
               onclick={() => copyCommand(cmdText, tool.id)}
+            >
+              <iconify-icon icon={copied[tool.id] ? 'lucide:check' : 'lucide:copy'} width="13"></iconify-icon>
+            </button>
+          </div>
+        {/if}
+        {#if argsText}
+          {@const argsCopyLabel = copied[tool.id] ? $t('tools.copied') : $t('tools.copy_args')}
+          <div class="args-block">
+            <pre class="args-text">{argsText}</pre>
+            <button
+              type="button"
+              class="cmd-copy"
+              title={argsCopyLabel}
+              aria-label={argsCopyLabel}
+              onclick={() => copyCommand(argsText, tool.id)}
             >
               <iconify-icon icon={copied[tool.id] ? 'lucide:check' : 'lucide:copy'} width="13"></iconify-icon>
             </button>
@@ -821,6 +850,20 @@ details[open] > summary .chev { transform: rotate(90deg); }
   color: var(--terminal-text); opacity: 0.5;
 }
 .cmd-copy:hover { opacity: 1; }
+/* A non-terminal tool's full input, on the plain surface its result uses. */
+.args-block {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 14px; border-top: 1px solid var(--border-table);
+  background: var(--bg-table-header);
+}
+.args-text {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 160px; overflow-y: auto;
+}
+.args-block .cmd-copy { color: var(--text-secondary); }
 /* One continuous surface: drop the divider the output pre would otherwise
    draw between itself and the command above it. */
 .cmd-block + .term-wrap .terminal-output { border-top: none; padding-top: 2px; }
