@@ -25,4 +25,21 @@ export function initIcons(): void {
   _api.setFetch((async () => {
     throw new Error('iconify: icon data is bundled; the API is not reachable by design')
   }) as unknown as typeof fetch)
+
+  disableVisibilityObservers()
+}
+
+// Every <iconify-icon> creates its own IntersectionObserver so it can defer
+// rendering until it scrolls into view. That deferral buys nothing here — the
+// data is bundled, there is nothing to fetch — and the browser re-checks every
+// observer on every frame. A long transcript carries thousands of icons, and
+// on a phone those checks alone made typing lag (#2721). The documented
+// opt-out is a per-element `noobserver` attribute; patching the one method
+// that honours it covers icons in templates and in rendered markdown alike.
+// An icon with no observer stays `_visible = true`, i.e. always renders.
+function disableVisibilityObservers(): void {
+  const el = customElements.get('iconify-icon') as { prototype: { startObserver?: () => void } } | undefined
+  if (el && typeof el.prototype.startObserver === 'function') {
+    el.prototype.startObserver = () => {}
+  }
 }
