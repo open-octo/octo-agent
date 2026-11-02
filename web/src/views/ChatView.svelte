@@ -72,6 +72,7 @@
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
+  import { settleScroll } from '../lib/settleScroll'
   import { observeArtifact, resetArtifacts, ARTIFACT_ORIGIN_SANDBOX, themeRev } from '../lib/artifacts'
   import { registerLaIframe, unregisterLaIframe, ensureLightAppStorage, lightappStorageReady } from '../lib/laStorage'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
@@ -1618,7 +1619,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const line = sc.clientHeight * 0.32
     let active = 0
     railTicks.forEach((tk, i) => {
-      const el = document.getElementById(`msg-${tk.id}`)
+      // Measure the row, not the bubble inside it: an off-screen row's
+      // contents are skipped (content-visibility), and asking for geometry
+      // inside one forces it to lay out — on every scroll frame, for every tick.
+      const bubble = document.getElementById(`msg-${tk.id}`)
+      const el = bubble?.closest('.msg-row') ?? bubble
       if (!el) return
       if (el.getBoundingClientRect().top - scTop <= line) active = i
     })
@@ -1678,14 +1683,20 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // Smooth-scroll the conversation so the target message lands ~90px below the
   // top of the scroll area. Deliberately not scrollIntoView (per the timeline
   // design): scrollIntoView can nudge ancestor scrollers and gives no offset
-  // control. Honors prefers-reduced-motion.
+  // control. Honors prefers-reduced-motion. Rows off screen are laid out at a
+  // placeholder height (content-visibility), so the first scroll lands on an
+  // estimate; settleScroll corrects it once the rows near the target are real.
+  let cancelJumpSettle: (() => void) | null = null
   function jumpToMessage(id: string) {
     const sc = messagesEl
     const el = document.getElementById(`msg-${id}`)
     if (!sc || !el) return
-    const target = Math.max(0, el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 90)
+    const offset = () => el.getBoundingClientRect().top - sc.getBoundingClientRect().top - 90
+    const target = Math.max(0, sc.scrollTop + offset())
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    cancelJumpSettle?.()
     sc.scrollTo({ top: target, behavior: reduce ? 'auto' : 'smooth' })
+    cancelJumpSettle = settleScroll(sc, el, offset)
   }
 
   // ── markdown copy buttons + mermaid diagrams setup ─────────────────────────
@@ -2528,6 +2539,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // ResizeObserver keeps us there, and scroll immediately in case the observer
   // doesn't fire (e.g. content height hasn't changed yet).
   function pinToBottom() {
+    cancelJumpSettle?.()
     stick = true
     requestAnimationFrame(() => {
       if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
@@ -3612,6 +3624,26 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    collapsing to the content height — that is what lets .landing centre itself
    vertically rather than sitting pinned to the top with all the slack below. */
 .messages-inner.no-session { min-height: 100%; box-sizing: border-box; }
+/* Every row stays mounted, so a long transcript is tens of thousands of nodes,
+   and each streamed delta or keystroke made the browser re-walk all of them
+   (#2721). Off-screen rows skip layout and paint; `auto` in the intrinsic
+   size makes a row keep its last measured height once it has been on screen.
+   A row never seen yet sits at the placeholder height, and when it renders
+   while you scroll up through history, scroll anchoring is what keeps the
+   view still. WebKit has no scroll anchoring (macOS shell, iOS): there the
+   view jumped by up to a row's height per step, so the rule is gated on
+   support. This also paint-contains each row: anything absolutely
+   positioned inside one must stay within its box. */
+@supports (overflow-anchor: auto) {
+  .messages-inner:not(.no-session) > :global(*) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 160px;
+  }
+}
+/* Printing (PDF export) prints this page; never leave a row as a placeholder. */
+@media print {
+  .messages-inner > :global(*) { content-visibility: visible !important; }
+}
 
 /* ── Landing page (no session yet) ───────────────────────────────────────── */
 /* Sits in the empty scroll area above the composer rather than replacing it,
