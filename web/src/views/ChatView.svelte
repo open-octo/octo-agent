@@ -72,6 +72,7 @@
   } from '../lib/stores'
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
+  import { settleScroll } from '../lib/settleScroll'
   import { observeArtifact, resetArtifacts, ARTIFACT_ORIGIN_SANDBOX, themeRev } from '../lib/artifacts'
   import { registerLaIframe, unregisterLaIframe, ensureLightAppStorage, lightappStorageReady } from '../lib/laStorage'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
@@ -1678,14 +1679,20 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // Smooth-scroll the conversation so the target message lands ~90px below the
   // top of the scroll area. Deliberately not scrollIntoView (per the timeline
   // design): scrollIntoView can nudge ancestor scrollers and gives no offset
-  // control. Honors prefers-reduced-motion.
+  // control. Honors prefers-reduced-motion. Rows off screen are laid out at a
+  // placeholder height (content-visibility), so the first scroll lands on an
+  // estimate; settleScroll corrects it once the rows near the target are real.
+  let cancelJumpSettle: (() => void) | null = null
   function jumpToMessage(id: string) {
     const sc = messagesEl
     const el = document.getElementById(`msg-${id}`)
     if (!sc || !el) return
-    const target = Math.max(0, el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 90)
+    const offset = () => el.getBoundingClientRect().top - sc.getBoundingClientRect().top - 90
+    const target = Math.max(0, sc.scrollTop + offset())
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    cancelJumpSettle?.()
     sc.scrollTo({ top: target, behavior: reduce ? 'auto' : 'smooth' })
+    cancelJumpSettle = settleScroll(sc, offset)
   }
 
   // ── markdown copy buttons + mermaid diagrams setup ─────────────────────────
@@ -3612,6 +3619,17 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    collapsing to the content height — that is what lets .landing centre itself
    vertically rather than sitting pinned to the top with all the slack below. */
 .messages-inner.no-session { min-height: 100%; box-sizing: border-box; }
+/* Every row stays mounted, so a long transcript is tens of thousands of nodes,
+   and each streamed delta or keystroke made the browser re-walk all of them
+   (#2721). Off-screen rows skip layout and paint; `auto` in the intrinsic
+   size makes a row keep its last measured height once it has been on screen,
+   so scrolling back up doesn't jump. The placeholder only matters for rows
+   never seen yet. This also paint-contains each row: anything absolutely
+   positioned inside one must stay within its box. */
+.messages-inner:not(.no-session) > :global(*) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
 
 /* ── Landing page (no session yet) ───────────────────────────────────────── */
 /* Sits in the empty scroll area above the composer rather than replacing it,
