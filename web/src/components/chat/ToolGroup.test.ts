@@ -148,17 +148,57 @@ describe('full arguments block', () => {
   })
 
   it('renders nothing for empty arguments', () => {
-    expect(render([tool({ name: 'mcp__x__list', args: {} })]).querySelector('.args-block')).toBeNull()
-  })
-
-  it('is skipped for tools whose body already shows their input', () => {
-    for (const name of ['terminal', 'todo_write', 'sub_agent', 'workflow', 'render_ui', 'write_file']) {
-      const el = render([tool({ name, args: { a: 1 } })])
-      expect(el.querySelector('.args-block'), name).toBeNull()
+    for (const args of [{}, [], null, '']) {
+      expect(render([tool({ name: 'mcp__x__list', args })]).querySelector('.args-block'), JSON.stringify(args)).toBeNull()
       unmount(app!); app = null
     }
-    expect(render([tool({ name: 'edit_file', args: { path: 'a' }, ui_payload: { diff: '@@' } })])
-      .querySelector('.args-block')).toBeNull()
+  })
+
+  it('is skipped when the rendered body already shows the input', () => {
+    const cases = [
+      tool({ name: 'terminal', args: { command: 'ls' } }),
+      tool({ name: 'todo_write', args: { todos: [{ status: 'pending', content: 'x' }] } }),
+      tool({ name: 'edit_file', args: { path: 'a' }, ui_payload: { diff: '@@' } }),
+      tool({ name: 'write_file', args: { path: 'a', content: 'x' }, ui_payload: { preview: 'x' } }),
+      tool({ name: 'render_ui', args: { spec: {} }, ui_payload: { spec: { type: 'text' } } }),
+    ]
+    for (const c of cases) {
+      expect(render([c]).querySelector('.args-block'), c.name as string).toBeNull()
+      unmount(app!); app = null
+    }
+  })
+
+  // Trails show the sub-agent's steps, never its prompt or the workflow script.
+  it('shows the prompt of a sub_agent and the script of a workflow', () => {
+    for (const name of ['sub_agent', 'workflow']) {
+      expect(render([tool({ name, args: { prompt: 'p'.repeat(300) } })]).querySelector('.args-text'), name).not.toBeNull()
+      unmount(app!); app = null
+    }
+  })
+
+  it('still shows the input when a body falls back to the plain result', () => {
+    expect(render([tool({ name: 'write_file', args: { path: 'a' }, error: 'denied' })])
+      .querySelector('.args-text')).not.toBeNull()
+    unmount(app!); app = null
+    expect(render([tool({ name: 'todo_write', args: '{not json', result: 'ok' })])
+      .querySelector('.args-text')).not.toBeNull()
+  })
+
+  it('copies the arguments and acknowledges it', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true, writable: true })
+    try {
+      const el = render([tool({ name: 'mcp__x__exec', args: { text: 'hi' } })])
+      const btn = el.querySelector('.args-block .cmd-copy') as HTMLButtonElement
+      expect(btn.getAttribute('aria-label')).toBe('Copy arguments')
+      btn.click()
+      await Promise.resolve(); await Promise.resolve()
+      expect(writeText).toHaveBeenCalledWith('{\n  "text": "hi"\n}')
+      await new Promise((r) => setTimeout(r, 0))
+      expect(btn.getAttribute('aria-label')).toBe('Copied')
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
   })
 })
 

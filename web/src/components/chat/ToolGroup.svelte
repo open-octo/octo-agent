@@ -351,14 +351,17 @@
   // The header shows arguments on one ellipsized line, with the whole text only
   // in a hover `title` — which touch screens never show, so an MCP call's input
   // was unreadable on a phone (#2723). Expanding a card now prints the full
-  // arguments above the result. Skipped for tools whose body already presents
-  // their input (terminal's command block, todo checklist, edit diff, write
-  // preview, sub-agent/workflow trails, rendered UI).
-  const ARGS_SHOWN_BY_BODY = new Set(['terminal', 'bash', 'todo_write', 'todowrite', 'sub_agent', 'workflow', 'render_ui', 'write_file'])
+  // arguments above the result. Skipped only when the body branch this card
+  // actually renders already presents the input: terminal's command block, the
+  // todo checklist, an edit diff, a write preview, rendered UI. Keyed on the
+  // branch's own condition, not the tool name, so a card that falls back to the
+  // plain result (unparseable todos, a write with no preview) still shows it.
+  // Sub-agent/workflow trails show steps, not the prompt or script — no skip.
   function fullArgs(tool: any): string {
-    if (ARGS_SHOWN_BY_BODY.has(tool.name) || tool.ui_payload?.diff) return ''
+    if (terminalCommand(tool) || todoItems(tool) || tool.ui_payload?.diff
+      || tool.ui_payload?.spec || (tool.name === 'write_file' && tool.ui_payload?.preview != null)) return ''
     const text = prettyResult(tool.args).trim()
-    return text === '{}' || text === '[]' ? '' : text
+    return ['', '{}', '[]', 'null', '""'].includes(text) ? '' : text
   }
 
   // A non-zero exit is not a tool error either — terminal reports it via the
@@ -850,7 +853,7 @@ details[open] > summary .chev { transform: rotate(90deg); }
   color: var(--terminal-text); opacity: 0.5;
 }
 .cmd-copy:hover { opacity: 1; }
-/* A non-terminal tool's full input, on the plain surface its result uses. */
+/* A non-terminal tool's full input, on a header-tinted strip above the result. */
 .args-block {
   display: flex; align-items: flex-start; gap: 8px;
   padding: 10px 14px; border-top: 1px solid var(--border-table);
