@@ -7,12 +7,15 @@
 //
 // It stops at the first sign of the user scrolling themselves, so it never
 // fights them, and gives up after a bounded number of frames — a target near
-// the bottom may be unreachable, and keeping on would pin the pane there.
+// the bottom may be unreachable, and keeping on would pin the pane there. It
+// also stops once the target leaves the DOM: switching sessions reuses the
+// same pane, and a detached target measures at 0, which would keep dragging
+// the new transcript away from the bottom it was just pinned to.
 
 const SETTLE_FRAMES = 30
 const SCROLLEND_FALLBACK_MS = 1000
 
-export function settleScroll(sc: HTMLElement, offset: () => number): () => void {
+export function settleScroll(sc: HTMLElement, target: Element, offset: () => number): () => void {
   let done = false
   let raf = 0
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -31,6 +34,7 @@ export function settleScroll(sc: HTMLElement, offset: () => number): () => void 
   const nudge = () => {
     raf = 0
     if (done) return
+    if (!sc.isConnected || !target.isConnected) return stop()
     const d = offset()
     if (Math.abs(d) >= 2) sc.scrollTop += d
     if (++frames >= SETTLE_FRAMES) stop()

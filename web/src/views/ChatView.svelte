@@ -1619,7 +1619,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const line = sc.clientHeight * 0.32
     let active = 0
     railTicks.forEach((tk, i) => {
-      const el = document.getElementById(`msg-${tk.id}`)
+      // Measure the row, not the bubble inside it: an off-screen row's
+      // contents are skipped (content-visibility), and asking for geometry
+      // inside one forces it to lay out — on every scroll frame, for every tick.
+      const bubble = document.getElementById(`msg-${tk.id}`)
+      const el = bubble?.closest('.msg-row') ?? bubble
       if (!el) return
       if (el.getBoundingClientRect().top - scTop <= line) active = i
     })
@@ -1692,7 +1696,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     cancelJumpSettle?.()
     sc.scrollTo({ top: target, behavior: reduce ? 'auto' : 'smooth' })
-    cancelJumpSettle = settleScroll(sc, offset)
+    cancelJumpSettle = settleScroll(sc, el, offset)
   }
 
   // ── markdown copy buttons + mermaid diagrams setup ─────────────────────────
@@ -2535,6 +2539,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // ResizeObserver keeps us there, and scroll immediately in case the observer
   // doesn't fire (e.g. content height hasn't changed yet).
   function pinToBottom() {
+    cancelJumpSettle?.()
     stick = true
     requestAnimationFrame(() => {
       if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
@@ -3622,13 +3627,22 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* Every row stays mounted, so a long transcript is tens of thousands of nodes,
    and each streamed delta or keystroke made the browser re-walk all of them
    (#2721). Off-screen rows skip layout and paint; `auto` in the intrinsic
-   size makes a row keep its last measured height once it has been on screen,
-   so scrolling back up doesn't jump. The placeholder only matters for rows
-   never seen yet. This also paint-contains each row: anything absolutely
+   size makes a row keep its last measured height once it has been on screen.
+   A row never seen yet sits at the placeholder height, and when it renders
+   while you scroll up through history, scroll anchoring is what keeps the
+   view still. WebKit has no scroll anchoring (macOS shell, iOS): there the
+   view jumped by up to a row's height per step, so the rule is gated on
+   support. This also paint-contains each row: anything absolutely
    positioned inside one must stay within its box. */
-.messages-inner:not(.no-session) > :global(*) {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 160px;
+@supports (overflow-anchor: auto) {
+  .messages-inner:not(.no-session) > :global(*) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 160px;
+  }
+}
+/* Printing (PDF export) prints this page; never leave a row as a placeholder. */
+@media print {
+  .messages-inner > :global(*) { content-visibility: visible !important; }
 }
 
 /* ── Landing page (no session yet) ───────────────────────────────────────── */
