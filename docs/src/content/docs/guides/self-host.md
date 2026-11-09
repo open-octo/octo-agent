@@ -176,7 +176,7 @@ way — and is exactly what the `.pkg` installer registers automatically.
 ## Running in Docker
 
 Every release also publishes a container image for `linux/amd64` and `linux/arm64` to
-`ghcr.io/open-octo/octo-agent`, tagged with the version (`1.17.22`) and, for stable releases,
+`ghcr.io/open-octo/octo-agent`, tagged with its version number and, for stable releases,
 `latest`. It wraps the same linux binary as the release archives and runs
 `octo serve --no-supervisor -addr :8088` as an unprivileged `octo` user (uid 1000):
 
@@ -201,10 +201,14 @@ docker logs octo   # the "open:" line carries the access key
   its working directory. A bind-mounted host directory must be writable by uid 1000.
 - **Restarts and upgrades.** A restart request exits with code `42`, so keep a restart policy
   (`--restart unless-stopped`) for the container to come back. Upgrade by pulling a newer image
-  and recreating the container; the data volume carries over.
+  and recreating the container; the data volume carries over. Don't use the web UI's in-place
+  upgrade here: the binary in the image isn't writable by the `octo` user, and a swapped binary
+  would vanish with the container anyway. `update_check: false` in `config.yml` stops the
+  automatic update badge.
 
 [`packaging/docker/compose.yaml`](https://github.com/open-octo/octo-agent/blob/main/packaging/docker/compose.yaml)
-is the same setup for Docker Compose, reading `OCTO_PROVIDER` and the API key from a `.env` file.
+is the same setup for Docker Compose, reading `OCTO_PROVIDER` and the API key from an optional
+`.env` file (without one, the web UI walks you through setup).
 To build the image yourself, pass a published version:
 `docker build --build-arg VERSION=1.17.22 -t octo packaging/docker`.
 

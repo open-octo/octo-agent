@@ -49,7 +49,7 @@ to `ghcr.io/open-octo/octo-agent` for amd64 and arm64.
 volume:
 
 ```sh
-cp packaging/docker/compose.yaml . && $EDITOR .env   # OCTO_PROVIDER, API key
+cp packaging/docker/compose.yaml . && $EDITOR .env   # optional: OCTO_PROVIDER, API key
 docker compose up -d
 docker compose logs octo     # access key is in the "open:" URL
 ```
