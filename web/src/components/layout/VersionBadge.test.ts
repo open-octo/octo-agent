@@ -273,3 +273,22 @@ describe('VersionBadge popover dismissal', () => {
     expect(pop()).toBe(null)
   })
 })
+
+describe('VersionBadge container image', () => {
+  // The official image is upgraded by pulling a newer one; the in-place swap
+  // would fail (and vanish with the container), so no upgrade button.
+  it('tells the user to pull a new image instead of offering an upgrade', async () => {
+    const badge = await render({ latest: '1.17.0', needs_update: true, upgrade_mode: 'container' })
+    badge.click()
+    flushSync()
+    expect(pop()?.textContent).toContain('Pull the new image')
+    expect(pop()?.querySelector('.vb-btn-primary')).toBe(null)
+  })
+
+  it('still offers the in-place upgrade for a plain serve', async () => {
+    const badge = await render({ latest: '1.17.0', needs_update: true })
+    badge.click()
+    flushSync()
+    expect(pop()?.querySelector('.vb-btn-primary')?.textContent).toBe('Upgrade')
+  })
+})

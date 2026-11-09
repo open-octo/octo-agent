@@ -49,7 +49,10 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash octo \
  && chown octo:octo /home/octo/.octo /workspace
 
 USER octo
-ENV HOME=/home/octo
+# OCTO_CONTAINER_IMAGE=1 makes octo refuse in-place binary upgrades (the web
+# UI and `octo upgrade`) and point at pulling a newer image instead.
+ENV HOME=/home/octo \
+    OCTO_CONTAINER_IMAGE=1
 WORKDIR /workspace
 
 # ~/.octo holds config, sessions, memory and the persisted access key.

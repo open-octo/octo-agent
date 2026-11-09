@@ -1599,6 +1599,39 @@ func TestHandleVersionUpgrade_AcceptedAndConflict(t *testing.T) {
 	}
 }
 
+func TestHandleVersion_ContainerImage(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv(upgrade.ContainerImageEnv, "1")
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+	w := httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["upgrade_mode"] != "container" {
+		t.Errorf("upgrade_mode = %v, want container", body["upgrade_mode"])
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/version/upgrade", nil)
+	w = httptest.NewRecorder()
+	serveLoopback(srv.mux, w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("upgrade status = %d, want 409", w.Code)
+	}
+	srv.upgradeMu.Lock()
+	running := srv.upgradeRunning
+	srv.upgradeMu.Unlock()
+	if running {
+		t.Error("refused upgrade must not start a background run")
+	}
+}
+
 func TestHandleVersion_NoUpdateCheck(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

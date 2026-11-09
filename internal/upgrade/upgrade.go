@@ -88,6 +88,22 @@ func CheckAttemptWindow() time.Duration { return checkAttemptTimeout }
 // Callers treat it as success, not failure.
 var ErrUpToDate = errors.New("already up to date")
 
+// ContainerImageEnv is set to "1" by the official container image
+// (packaging/docker/Dockerfile). There the image, not the binary, is the unit
+// of upgrade: the binary isn't writable by the image's user, and a swapped one
+// would vanish when the container is recreated. It is an explicit marker rather
+// than a /.dockerenv sniff because octo installed by install.sh inside a dev
+// container lives on a persistent home and upgrades in place just fine.
+const ContainerImageEnv = "OCTO_CONTAINER_IMAGE"
+
+// ErrContainerImage reports that this binary belongs to a container image and
+// must be upgraded by pulling a newer image. --force does not override it.
+var ErrContainerImage = errors.New("this octo runs from a container image; upgrade by pulling a newer image and recreating the container")
+
+// ContainerImage reports whether this binary runs from the official
+// container image (see ContainerImageEnv).
+func ContainerImage() bool { return os.Getenv(ContainerImageEnv) == "1" }
+
 // Options configures Run.
 type Options struct {
 	// Force proceeds despite a dev build or an already-latest version.
@@ -289,6 +305,9 @@ type Prepared struct {
 // touching the installed file. ErrUpToDate means nothing needs doing.
 // Callers must Close the result.
 func Prepare(ctx context.Context, opts Options) (*Prepared, error) {
+	if ContainerImage() {
+		return nil, ErrContainerImage
+	}
 	if !opts.Force {
 		if err := Eligible(); err != nil {
 			return nil, err

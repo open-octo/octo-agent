@@ -169,9 +169,9 @@ docker logs octo   # "open:" 那一行带着 access key
   `python3`），能处理的文件就是你挂到 `/workspace` 的那些，这也是它的工作目录。挂宿主机目录时，
   要保证 uid 1000 有写权限。
 - **重启和升级。** 请求重启时进程以退出码 `42` 退出，得靠重启策略（`--restart unless-stopped`）
-  把容器拉起来。升级就是拉新镜像、重建容器，数据卷原样保留。别用 Web UI 里的原地升级：镜像里的
-  二进制 `octo` 用户没有写权限，就算换成功了，容器一重建也就没了。在 `config.yml` 里设
-  `update_check: false` 可以关掉自动的更新提示。
+  把容器拉起来。升级就是拉新镜像、重建容器，数据卷原样保留。镜像里设了 `OCTO_CONTAINER_IMAGE=1`，
+  所以 Web UI 的更新提示只会让你去拉新镜像，不给原地升级的按钮，`octo upgrade` 也会直接拒绝——
+  原地换掉的二进制，容器一重建也就没了。
 
 [`packaging/docker/compose.yaml`](https://github.com/open-octo/octo-agent/blob/main/packaging/docker/compose.yaml)
 是同一套配置的 Docker Compose 版本，`OCTO_PROVIDER` 和 API key 从 `.env` 文件读；不建这个文件也行，

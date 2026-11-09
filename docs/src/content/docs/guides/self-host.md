@@ -201,10 +201,10 @@ docker logs octo   # the "open:" line carries the access key
   its working directory. A bind-mounted host directory must be writable by uid 1000.
 - **Restarts and upgrades.** A restart request exits with code `42`, so keep a restart policy
   (`--restart unless-stopped`) for the container to come back. Upgrade by pulling a newer image
-  and recreating the container; the data volume carries over. Don't use the web UI's in-place
-  upgrade here: the binary in the image isn't writable by the `octo` user, and a swapped binary
-  would vanish with the container anyway. `update_check: false` in `config.yml` stops the
-  automatic update badge.
+  and recreating the container; the data volume carries over. The image sets
+  `OCTO_CONTAINER_IMAGE=1`, so the web UI's update badge says exactly that instead of offering an
+  in-place upgrade, and `octo upgrade` refuses — a swapped binary would vanish with the container
+  anyway.
 
 [`packaging/docker/compose.yaml`](https://github.com/open-octo/octo-agent/blob/main/packaging/docker/compose.yaml)
 is the same setup for Docker Compose, reading `OCTO_PROVIDER` and the API key from an optional

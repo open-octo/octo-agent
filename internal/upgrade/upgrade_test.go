@@ -379,6 +379,24 @@ func TestRun_DevRefusalAndForce(t *testing.T) {
 	}
 }
 
+func TestRun_ContainerImageRefusesEvenForced(t *testing.T) {
+	asRelease(t, "0.19.0", "abc1234")
+	srv := fakeRelease(t, "0.20.0", "NEW", "")
+	pointAt(t, srv)
+	target := writeTarget(t, "OLD")
+	t.Setenv(ContainerImageEnv, "1")
+
+	for _, force := range []bool{false, true} {
+		err := Run(context.Background(), Options{TargetPath: target, Force: force})
+		if !errors.Is(err, ErrContainerImage) {
+			t.Fatalf("force=%v: want ErrContainerImage, got %v", force, err)
+		}
+	}
+	if got, _ := os.ReadFile(target); string(got) != "OLD" {
+		t.Fatal("target modified by refused run")
+	}
+}
+
 func TestRun_NoLdflagsBuildRefuses(t *testing.T) {
 	asRelease(t, "0.19.0", "") // plain version, empty commit = bare go build
 	srv := fakeRelease(t, "0.20.0", "NEW", "")
