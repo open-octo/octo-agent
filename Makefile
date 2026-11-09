@@ -158,6 +158,11 @@ clean:
 # ── ripgrep embed (build-time only) ──────────────────────────────────────────
 # Downloads the matching rg release for GOOS/GOARCH, extracts the binary,
 # and places it where go:embed will pick it up. No-op if already present.
+#
+# set -e + curl -f make a failed download fail here, loudly. Without them an
+# HTTP error page was "extracted", cp failed, the recipe still exited 0, and
+# the build died later at go:embed ("pattern binaries/rg: no matching files
+# found"). --retry rides out GitHub release-asset 5xx blips.
 
 RG_VERSION := 15.1.0
 
@@ -171,6 +176,7 @@ $(RG_EMBED_BIN):
 	@echo "Downloading ripgrep $(RG_VERSION) for $(_RG_GOOS)/$(_RG_GOARCH)..."
 	@mkdir -p $(RG_EMBED_DIR)
 	@bash -c ' \
+		set -euo pipefail; \
 		GOOS="$(_RG_GOOS)"; GOARCH="$(_RG_GOARCH)"; RG_VERSION="$(RG_VERSION)"; \
 		case "$${GOOS}_$${GOARCH}" in \
 			darwin_amd64)   asset="ripgrep-$${RG_VERSION}-x86_64-apple-darwin.tar.gz" ;; \
@@ -182,12 +188,12 @@ $(RG_EMBED_BIN):
 		esac; \
 		url="https://github.com/BurntSushi/ripgrep/releases/download/$${RG_VERSION}/$${asset}"; \
 		if [ "$${GOOS}" = "windows" ]; then \
-			curl -sL "$$url" -o /tmp/rg-embed.zip; \
+			curl -fsSL --retry 3 "$$url" -o /tmp/rg-embed.zip; \
 			unzip -q -o /tmp/rg-embed.zip -d /tmp/rg-embed; \
 			cp /tmp/rg-embed/ripgrep-$${RG_VERSION}-*/rg.exe $(RG_EMBED_BIN); \
 			rm -rf /tmp/rg-embed.zip /tmp/rg-embed; \
 		else \
-			curl -sL "$$url" | tar -xzf - -C /tmp; \
+			curl -fsSL --retry 3 "$$url" | tar -xzf - -C /tmp; \
 			cp /tmp/ripgrep-$${RG_VERSION}-*/rg $(RG_EMBED_BIN); \
 			rm -rf /tmp/ripgrep-$${RG_VERSION}-*; \
 		fi; \
