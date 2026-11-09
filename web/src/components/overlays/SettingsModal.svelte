@@ -59,7 +59,7 @@
   // uses, which stays mounted (Sidebar.svelte) and picks up this modal's
   // triggered upgrade via the same global upgrade_log/upgrade_complete WS
   // broadcasts, so its badge reflects progress after this modal closes.
-  let upgradeMode   = $state<'cli' | 'installer'>('cli')
+  let upgradeMode   = $state<'cli' | 'installer' | 'container'>('cli')
   let loading       = $state(true)
 
   let cat = $state<'general' | 'endpoints' | 'agent' | 'mobile' | 'experimental' | 'data' | 'about'>('general')
@@ -313,7 +313,7 @@
       updateAvail = !!v.needs_update
       versionUpdate.set({ latest: latestStr, needsUpdate: updateAvail })
       downloadUrl = v.download_url ?? ''
-      upgradeMode = v.upgrade_mode === 'installer' ? 'installer' : 'cli'
+      upgradeMode = v.upgrade_mode === 'installer' || v.upgrade_mode === 'container' ? v.upgrade_mode : 'cli'
     } catch { /* non-critical */ }
   }
 
@@ -332,7 +332,9 @@
         showToast($t('settings.update.uptodate'), 'success')
         return
       }
-      if (upgradeMode === 'installer') {
+      if (upgradeMode === 'container') {
+        showToast($t('upgrade.container'), 'info')
+      } else if (upgradeMode === 'installer') {
         if (downloadUrl) {
           try { await api.openExternal(downloadUrl) }
           catch { window.open(downloadUrl, '_blank', 'noopener') }
@@ -765,7 +767,7 @@
               </div>
               <button class="btns" onclick={checkUpdate} disabled={checkingUpdate}>
                 {checkingUpdate ? $t('settings.update.checking')
-                  : !updateAvail ? $t('settings.update.check')
+                  : !updateAvail || upgradeMode === 'container' ? $t('settings.update.check')
                   : upgradeMode === 'installer' ? $t('upgrade.btn.download')
                   : $t('upgrade.btn.upgrade')}
               </button>

@@ -40,7 +40,25 @@ launchctl load ~/Library/LaunchAgents/dev.octo-agent.serve.plist
 tail -f /tmp/octo-serve.log
 ```
 
-> Both templates default to a loopback bind. Exposing the server on a LAN/public
+### Docker
+
+[`docker/Dockerfile`](docker/Dockerfile) wraps a published linux release binary
+(downloaded and checked against `checksums.txt`); the release workflow pushes it
+to `ghcr.io/open-octo/octo-agent` for amd64 and arm64.
+[`docker/compose.yaml`](docker/compose.yaml) runs it with the data root on a
+volume:
+
+```sh
+cp packaging/docker/compose.yaml . && $EDITOR .env   # optional: OCTO_PROVIDER, API key
+docker compose up -d
+docker compose logs octo     # access key is in the "open:" URL
+```
+
+The container binds `:8088`, so every request — even from the host's own
+browser, which arrives via the Docker bridge — needs the access key. See the
+self-host guide's "Running in Docker" section for volumes and upgrades.
+
+> The systemd and launchd templates default to a loopback bind. Exposing the server on a LAN/public
 > address requires `-addr :8088` (or similar) **and** an access key — see
 > [SECURITY.md](../SECURITY.md).
 

@@ -84,7 +84,9 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		// "cli" — the in-place binary swap of POST /api/version/upgrade (octo
 		// serve); "installer" — the desktop build, whose binary can't be swapped
 		// in place (it would overwrite the GUI / break the macOS bundle), so the
-		// UI offers a download link instead. Derived, not configured.
+		// UI offers a download link instead; "container" — the official container
+		// image, upgraded by pulling a newer image, so the UI only says so.
+		// Derived, not configured.
 		"upgrade_mode": s.upgradeMode(),
 		// download_url is where "Download update" sends the user — the marketing
 		// site's per-platform installer buttons, not the raw releases listing — so
@@ -103,11 +105,15 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 // upgradeMode reports how this server updates: "installer" for the desktop
-// build (a NativeBridge is wired and its binary is installer-managed), "cli"
-// otherwise (octo serve's in-place swap).
+// build (a NativeBridge is wired and its binary is installer-managed),
+// "container" for the official container image (a newer image replaces it),
+// "cli" otherwise (octo serve's in-place swap).
 func (s *Server) upgradeMode() string {
 	if s.cfg.Native != nil {
 		return "installer"
+	}
+	if upgrade.ContainerImage() {
+		return "container"
 	}
 	return "cli"
 }
@@ -353,6 +359,12 @@ func (s *Server) handleVersionUpgrade(w http.ResponseWriter, r *http.Request) {
 	// route is registered unconditionally, so a remote peer must not drive it.
 	if s.cfg.Native != nil {
 		writeError(w, http.StatusConflict, "this build updates through its installer; use the download link")
+		return
+	}
+	// Same for the container image: its frontend never posts this either, and
+	// Prepare would refuse anyway — but only after answering 202.
+	if upgrade.ContainerImage() {
+		writeError(w, http.StatusConflict, upgrade.ErrContainerImage.Error())
 		return
 	}
 

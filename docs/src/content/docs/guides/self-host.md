@@ -173,6 +173,45 @@ resolution entirely and the profile would collide with the default on 8088.)
 On macOS, a `launchd` plist with the equivalent `ProgramArguments` and `KeepAlive` works the same
 way — and is exactly what the `.pkg` installer registers automatically.
 
+## Running in Docker
+
+Every release also publishes a container image for `linux/amd64` and `linux/arm64` to
+`ghcr.io/open-octo/octo-agent`, tagged with its version number and, for stable releases,
+`latest`. It wraps the same linux binary as the release archives and runs
+`octo serve --no-supervisor -addr :8088` as an unprivileged `octo` user (uid 1000):
+
+```bash
+docker run -d --name octo --restart unless-stopped \
+  -p 127.0.0.1:8088:8088 \
+  -v octo-data:/home/octo/.octo \
+  -v "$PWD":/workspace \
+  -e OCTO_PROVIDER=anthropic -e ANTHROPIC_API_KEY=sk-ant-xxxxx \
+  ghcr.io/open-octo/octo-agent:latest
+docker logs octo   # the "open:" line carries the access key
+```
+
+- **The access key is always required.** Requests reach the container from the Docker bridge, not
+  from loopback, so even a browser on the same machine must present the key. The logged URL names
+  the container's internal IP; open `http://localhost:8088/?access_key=...` instead. Pin your own
+  key with `-e OCTO_ACCESS_KEY=...` if you'd rather not read it from the log.
+- **`/home/octo/.octo` is the data root** — config, sessions, memory and the generated access key.
+  Keep it on a volume or every new container starts from scratch.
+- **The agent sees only the container.** Its terminal tool runs inside the image (Debian with
+  `git`, `curl` and `python3`), and files it can work on are whatever you mount at `/workspace`,
+  its working directory. A bind-mounted host directory must be writable by uid 1000.
+- **Restarts and upgrades.** A restart request exits with code `42`, so keep a restart policy
+  (`--restart unless-stopped`) for the container to come back. Upgrade by pulling a newer image
+  and recreating the container; the data volume carries over. The image sets
+  `OCTO_CONTAINER_IMAGE=1`, so the web UI's update badge says exactly that instead of offering an
+  in-place upgrade, and `octo upgrade` refuses — a swapped binary would vanish with the container
+  anyway.
+
+[`packaging/docker/compose.yaml`](https://github.com/open-octo/octo-agent/blob/main/packaging/docker/compose.yaml)
+is the same setup for Docker Compose, reading `OCTO_PROVIDER` and the API key from an optional
+`.env` file (without one, the web UI walks you through setup).
+To build the image yourself, pass a published version:
+`docker build --build-arg VERSION=1.17.22 -t octo packaging/docker`.
+
 ## Logs and diagnostics
 
 Foreground (`octo serve`) writes straight to the terminal it was started in. Daemon mode (`-d`) has

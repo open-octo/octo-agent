@@ -26,10 +26,12 @@
   let profile = $state('')
   // upgradeMode is 'cli' (octo serve — the in-place swap below is valid) or
   // 'installer' (desktop build — a swap would clobber the running binary, so we
-  // link to the download page instead). downloadUrl is that download page.
-  // selfUpdateAvail: the desktop build can swap itself (its native updater
-  // window), so a loopback badge offers "Update Now" before the download link.
-  let upgradeMode = $state<'cli' | 'installer'>('cli')
+  // link to the download page instead) or 'container' (the official image —
+  // updated by pulling a newer one, so we only say that). downloadUrl is that
+  // download page. selfUpdateAvail: the desktop build can swap itself (its
+  // native updater window), so a loopback badge offers "Update Now" before the
+  // download link.
+  let upgradeMode = $state<'cli' | 'installer' | 'container'>('cli')
   let downloadUrl = $state('')
   let selfUpdateAvail = $state(false)
   let phase = $state<Phase>('idle')
@@ -71,7 +73,7 @@
       current = d.current ?? (d.version ?? '').replace(/^v/, '')
       if (d.cli_command) cliCommand = d.cli_command
       profile = d.profile ?? ''
-      upgradeMode = d.upgrade_mode === 'installer' ? 'installer' : 'cli'
+      upgradeMode = d.upgrade_mode === 'installer' || d.upgrade_mode === 'container' ? d.upgrade_mode : 'cli'
       downloadUrl = d.download_url ?? ''
       selfUpdateAvail = d.self_update === true
       nativeShell.set(d.native === true && isDesktopShell)
@@ -233,8 +235,13 @@
       {:else if needsUpdate}
         <p class="vb-desc">{$t('upgrade.desc')}</p>
         <p class="vb-versions">v{current} <span class="vb-arrow">→</span> v{latest}</p>
+        {#if upgradeMode === 'container'}
+          <p class="vb-desc">{$t('upgrade.container')}</p>
+        {/if}
         <div class="vb-actions">
-          {#if upgradeMode === 'installer' && selfUpdateAvail && $localAccess}
+          {#if upgradeMode === 'container'}
+            <!-- No action: the image, not this binary, is what gets upgraded. -->
+          {:else if upgradeMode === 'installer' && selfUpdateAvail && $localAccess}
             <button class="vb-btn-primary" onclick={startSelfUpdate}>{$t('upgrade.btn.selfupdate')}</button>
           {:else if upgradeMode === 'installer'}
             <button class="vb-btn-primary" onclick={downloadUpdate}>{$t('upgrade.btn.download')}</button>
