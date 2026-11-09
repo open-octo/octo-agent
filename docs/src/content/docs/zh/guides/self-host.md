@@ -142,6 +142,39 @@ WantedBy=default.target
 在 macOS 上，一份带等价 `ProgramArguments` 和 `KeepAlive` 的 `launchd` plist 效果一样——
 这正是 `.pkg` 安装器自动注册的东西。
 
+## 用 Docker 运行
+
+每次发版都会往 `ghcr.io/open-octo/octo-agent` 推一份容器镜像，支持 `linux/amd64` 和
+`linux/arm64`，tag 是版本号（如 `1.17.22`），正式版另外打 `latest`。镜像里装的就是 release
+压缩包里那个 linux 二进制，以非特权用户 `octo`（uid 1000）运行
+`octo serve --no-supervisor -addr :8088`：
+
+```bash
+docker run -d --name octo --restart unless-stopped \
+  -p 127.0.0.1:8088:8088 \
+  -v octo-data:/home/octo/.octo \
+  -v "$PWD":/workspace \
+  -e OCTO_PROVIDER=anthropic -e ANTHROPIC_API_KEY=sk-ant-xxxxx \
+  ghcr.io/open-octo/octo-agent:latest
+docker logs octo   # "open:" 那一行带着 access key
+```
+
+- **一定要带 access key。** 请求是经 Docker 网桥进容器的，在容器看来不是回环地址，所以就算
+  浏览器和容器在同一台机器上也得带 key。日志里那个 URL 写的是容器内网 IP，换成
+  `http://localhost:8088/?access_key=...` 打开。不想翻日志的话，用 `-e OCTO_ACCESS_KEY=...`
+  自己指定一个。
+- **数据都在 `/home/octo/.octo`**：配置、会话、记忆和自动生成的 access key。这个目录要挂卷，
+  不然每次新建容器都是一个全新的 octo。
+- **agent 只能碰到容器里的东西。** terminal 工具在镜像里执行（Debian，带 `git`、`curl`、
+  `python3`），能处理的文件就是你挂到 `/workspace` 的那些，这也是它的工作目录。挂宿主机目录时，
+  要保证 uid 1000 有写权限。
+- **重启和升级。** 请求重启时进程以退出码 `42` 退出，得靠重启策略（`--restart unless-stopped`）
+  把容器拉起来。升级就是拉新镜像、重建容器，数据卷原样保留。
+
+[`packaging/docker/compose.yaml`](https://github.com/open-octo/octo-agent/blob/main/packaging/docker/compose.yaml)
+是同一套配置的 Docker Compose 版本，`OCTO_PROVIDER` 和 API key 从 `.env` 文件读。想自己构建镜像，
+传一个已发布的版本号即可：`docker build --build-arg VERSION=1.17.22 -t octo packaging/docker`。
+
 ## 日志与排障
 
 前台运行（`octo serve`）会把输出直接打到启动它的那个终端。后台模式（`-d`）没有终端可写，

@@ -1,0 +1,28 @@
+# octo serve via Docker Compose.
+#
+#   cp packaging/docker/compose.yaml . && $EDITOR .env   # see below
+#   docker compose up -d
+#   docker compose logs octo      # prints the access key in an "open:" URL
+#
+# The logged URL names the container's own IP; open it as
+# http://localhost:8088/?access_key=... instead.
+#
+# .env next to this file (chmod 600) — the same variables as packaging/systemd:
+#   OCTO_ACCESS_KEY=...          (optional; otherwise generated and persisted)
+#   OCTO_PROVIDER=anthropic      (required until config.yml names a provider)
+#   ANTHROPIC_API_KEY=...        (that vendor's key; OPENAI_API_KEY=... etc.)
+services:
+  octo:
+    image: ghcr.io/open-octo/octo-agent:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Loopback on the host by default; change to "8088:8088" to expose it.
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - octo-data:/home/octo/.octo
+      - octo-workspace:/workspace
+
+volumes:
+  octo-data:
+  octo-workspace:
