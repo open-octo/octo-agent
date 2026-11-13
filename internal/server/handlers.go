@@ -737,7 +737,11 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 				// collapse into one card. Emitted as a standalone "thinking"
 				// segment rather than inline, since this round has no answer bubble.
 				if thinking != "" {
-					events = append(events, map[string]any{"type": "thinking", "text": thinking})
+					ev := map[string]any{"type": "thinking", "text": thinking}
+					if !m.CreatedAt.IsZero() {
+						ev["created_at"] = m.CreatedAt.UnixMilli()
+					}
+					events = append(events, ev)
 				}
 				var txt strings.Builder
 				for _, b := range m.Blocks {

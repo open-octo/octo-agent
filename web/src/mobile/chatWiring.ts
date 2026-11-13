@@ -73,7 +73,7 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
       messageIndex: ev.message_index,
     })
   } else if (ev.type === 'thinking') {
-    if (showReasoning) commitThinking(sid, ev.text ?? '')
+    if (showReasoning) commitThinking(sid, ev.text ?? '', ev.created_at)
   } else if (ev.type === 'tool_call') {
     addToolCallToGroup(sid, {
       id: uid('t'), toolId: ev.tool_id ?? '', name: ev.name ?? '', args: ev.args ?? '',

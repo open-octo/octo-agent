@@ -3305,6 +3305,66 @@ func TestHandleGetSessionMessages_AssistantMessageCarriesCreatedAt(t *testing.T)
 	}
 }
 
+// A replayed standalone reasoning segment carries the persisted CreatedAt too:
+// when it opens a turn it is the entry the Web UI stamps the turn's time from,
+// and without it the stamp falls back to the reload time.
+func TestHandleGetSessionMessages_ThinkingCarriesCreatedAt(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	at := time.Date(2026, 11, 11, 8, 2, 0, 0, time.UTC)
+	round := func(id string, createdAt time.Time) []agent.Message {
+		return []agent.Message{
+			{Role: agent.RoleAssistant, CreatedAt: createdAt, Blocks: []agent.ContentBlock{
+				{Type: "thinking", Thinking: "need the forecast"},
+				{Type: "tool_use", ID: id, Name: "terminal", Input: map[string]any{}},
+			}},
+			{Role: agent.RoleUser, Blocks: []agent.ContentBlock{{Type: "tool_result", ToolUseID: id, Result: "sunny"}}},
+		}
+	}
+	sess := agent.NewSession("deepseek-v4-pro", "")
+	sess.Title = "fixed"
+	sess.Messages = append(sess.Messages, agent.Message{Role: agent.RoleUser, Content: "weather?", CreatedAt: at})
+	sess.Messages = append(sess.Messages, round("t1", at.Add(time.Second))...)
+	// A pre-CreatedAt round omits the field rather than sending 1970.
+	sess.Messages = append(sess.Messages, round("t2", time.Time{})...)
+	if err := sess.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0"})
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sess.ID+"/messages", nil)
+	req.SetPathValue("id", sess.ID)
+	rec := httptest.NewRecorder()
+	srv.handleGetSessionMessages(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages endpoint = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var got []map[string]any
+	for _, ev := range body.Events {
+		if ev["type"] == "thinking" {
+			got = append(got, ev)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("thinking events = %d, want 2: %+v", len(got), body.Events)
+	}
+	if want := float64(at.Add(time.Second).UnixMilli()); got[0]["created_at"] != want {
+		t.Errorf("thinking created_at = %v, want %v", got[0]["created_at"], want)
+	}
+	if v, ok := got[1]["created_at"]; ok {
+		t.Errorf("pre-CreatedAt thinking carried created_at = %v, want none", v)
+	}
+}
+
 // The transcript endpoint is the one response that grows with the session —
 // several MB for a long one — so it is gzipped for a client that accepts it,
 // and the decompressed body must be exactly what an identity request gets.
