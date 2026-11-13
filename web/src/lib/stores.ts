@@ -709,7 +709,9 @@ export function stopTrailingCaret(sessionId: string) {
 // the current thinking step). Placing it in the message list — rather than the
 // transient live buffer — preserves think → act order and makes the segment a
 // tool-group boundary. Whitespace-only thinking is dropped.
-export function commitThinking(sessionId: string, text: string) {
+//
+// createdAt is the persisted timestamp on replay; live callers omit it.
+export function commitThinking(sessionId: string, text: string, createdAt?: number) {
   const t = (text ?? '').trim()
   if (!t) return
   chatMessages.update(m => {
@@ -718,7 +720,7 @@ export function commitThinking(sessionId: string, text: string) {
     const msgs = finalizeStreamingAssistant(m[sessionId] || [])
     msgs.push({
       id: uid('th'), type: 'thinking', thinking: t,
-      createdAt: Date.now(), streaming: false, tools: [], todos: [],
+      createdAt: createdAt ?? Date.now(), streaming: false, tools: [], todos: [],
     })
     return { ...m, [sessionId]: msgs }
   })
@@ -750,7 +752,9 @@ export function addToolCallToGroup(sessionId: string, toolCall: any) {
     // A tool call starts a new action segment: stop the caret on any trailing
     // streaming assistant text so it doesn't keep blinking behind the tool card.
     const finalized = finalizeStreamingAssistant(msgs)
-    finalized.push({ id: uid('grp'), type: 'tool_group', content: '', streaming: true, tools: [toolCall], todos: [], createdAt: Date.now() })
+    // startedAt is the persisted timestamp on replay, so a reloaded group
+    // keeps the time it really started rather than the reload time.
+    finalized.push({ id: uid('grp'), type: 'tool_group', content: '', streaming: true, tools: [toolCall], todos: [], createdAt: toolCall.startedAt ?? Date.now() })
     return { ...m, [sessionId]: finalized }
   })
 }

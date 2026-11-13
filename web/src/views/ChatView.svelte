@@ -73,6 +73,7 @@
   import { ws, wsState, wsReconnect } from '../lib/ws'
   import * as api from '../lib/api'
   import { settleScroll } from '../lib/settleScroll'
+  import { fmtMsgTime, fmtMsgTimeFull } from '../lib/msgTime'
   import { observeArtifact, resetArtifacts, ARTIFACT_ORIGIN_SANDBOX, themeRev } from '../lib/artifacts'
   import { registerLaIframe, unregisterLaIframe, ensureLightAppStorage, lightappStorageReady } from '../lib/laStorage'
   import { renderMarkdown, escapeHtml, setupCopyButtons } from '../lib/markdown'
@@ -336,12 +337,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   function fmtTokens(n: number): string {
     return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
   }
-  // HH:MM for the message meta row. Replayed history carries the persisted
-  // created_at; only sessions that predate per-message CreatedAt fall back to
-  // the reload time.
-  function fmtTime(ts: number): string {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }
 
   // ── history handler ────────────────────────────────────────────────────────
   // sid is the session the fetch was started for — NOT re-read from
@@ -405,7 +400,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // $sessions can still be empty when this loop runs, which would make
       // `showReasoning` fall back to its default (true) regardless of the
       // session's real setting.
-      if (historyShowReasoning) commitThinking(sid, ev.text ?? '')
+      if (historyShowReasoning) commitThinking(sid, ev.text ?? '', ev.created_at)
     } else if (ev.type === 'tool_call') {
       addToolCallToGroup(sid, {
         id: uid('t'),
@@ -2805,7 +2800,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                   <span class="meta-avatar bot" aria-hidden="true"><OctoLogo size={22} /></span>
                   <span class="meta-name">Octo</span>
                 {/if}
-                {#if ts}<span class="meta-time">{fmtTime(ts)}</span>{/if}
+                {#if ts}<span class="meta-time" title={fmtMsgTimeFull(ts)}>{fmtMsgTime(ts)}</span>{/if}
               </div>
             {/if}
           {/snippet}
@@ -2893,7 +2888,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                     <iconify-icon icon="ant-design:user-outlined" width="13"></iconify-icon>
                   </span>
                   <span class="meta-name">{$t('chat.you')}</span>
-                  {#if msg.createdAt}<span class="meta-time">{fmtTime(msg.createdAt)}</span>{/if}
+                  {#if msg.createdAt}<span class="meta-time" title={fmtMsgTimeFull(msg.createdAt)}>{fmtMsgTime(msg.createdAt)}</span>{/if}
                 </div>
                 <div class="user-card-wrap">
                   <div class="user-card" class:pending={msg.pending}>
@@ -3079,6 +3074,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
                   <!-- Message actions -->
                   {#if !msg.streaming}
                     <div class="msg-actions reply-actions">
+                      <!-- The meta row stamps only the first chunk of a turn;
+                           every later reply in a long turn carries its own
+                           time here, so it is clear when each one landed. -->
+                      {#if msg.createdAt && !(i === 0 || msgs[i - 1]?.type === 'user')}
+                        <span class="meta-time reply-time" title={fmtMsgTimeFull(msg.createdAt)}>{fmtMsgTime(msg.createdAt)}</span>
+                      {/if}
                       <!-- Branch only on a reply that closed a turn: an
                            intermediate tool-round bubble carries no
                            messageIndex, and forking there would orphan the
@@ -3895,6 +3896,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 /* ── Message actions ─────────────────────────────────────────────────────── */
 .msg-actions { display: flex; align-items: center; gap: 2px; }
 .reply-actions { margin-top: -4px; }
+.reply-time { margin-right: 4px; }
 .action-btn {
   width: 26px; height: 26px; border: none; background: transparent;
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
