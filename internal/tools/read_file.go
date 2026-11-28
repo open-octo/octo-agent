@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/open-octo/octo-agent/internal/agent"
@@ -333,16 +334,32 @@ func resolvePathIn(base, path string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-// intArg pulls an int from input, accepting either int or float64
-// (JSON numbers arrive as float64 from encoding/json).
-func intArg(input map[string]any, key string, dflt int) int {
+// argInt reads an integer argument, tolerating every shape a model actually
+// emits: an int, a JSON number (float64), or a number quoted as a string
+// ("5" — common from models that stringify scalars). ok is false when the key
+// is absent or carries something that isn't a number at all, which lets the
+// caller distinguish "you forgot task_id" from "you sent task_id as text".
+func argInt(input map[string]any, key string) (int, bool) {
 	switch v := input[key].(type) {
 	case int:
-		return v
+		return v, true
 	case int64:
-		return int(v)
+		return int(v), true
 	case float64:
-		return int(v)
+		return int(v), true
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// intArg pulls an int from input, falling back to dflt when the argument is
+// absent or unusable. See argInt for the accepted shapes.
+func intArg(input map[string]any, key string, dflt int) int {
+	if v, ok := argInt(input, key); ok {
+		return v
 	}
 	return dflt
 }

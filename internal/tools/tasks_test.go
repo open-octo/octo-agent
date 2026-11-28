@@ -173,6 +173,35 @@ func TestTaskUpdateTool_Execute_ReportsMistypedKey(t *testing.T) {
 	}
 }
 
+func TestTaskUpdateTool_Execute_QuotedTaskID(t *testing.T) {
+	store := useTaskStore(t)
+	id, _ := store.Create("task", "", "")
+
+	// A quoted ID is accepted rather than read as missing.
+	if _, err := (TaskUpdateTool{}).Execute(context.Background(), "task_update", map[string]any{
+		"task_id": fmt.Sprint(id),
+		"status":  "completed",
+	}); err != nil {
+		t.Fatalf("quoted task_id should be accepted: %v", err)
+	}
+	if got, _ := store.Get(id); got.Status != tasks.Completed {
+		t.Errorf("Status = %q, want completed", got.Status)
+	}
+
+	// A non-numeric ID must say what arrived, not claim the field was absent —
+	// otherwise the model resends the same call.
+	_, err := (TaskUpdateTool{}).Execute(context.Background(), "task_update", map[string]any{
+		"task_id": "abc",
+		"status":  "completed",
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be an integer") {
+		t.Fatalf("expected a type error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "is required") {
+		t.Errorf("a wrong-typed task_id must not be reported as missing: %v", err)
+	}
+}
+
 func TestTaskUpdateTool_Execute_InvalidStatus(t *testing.T) {
 	store := useTaskStore(t)
 	id, _ := store.Create("task", "", "")

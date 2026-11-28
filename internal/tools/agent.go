@@ -410,14 +410,22 @@ func subAgentResultUI(agentID string) map[string]any {
 	return map[string]any{"agent_id": agentID}
 }
 
-// boolArg pulls a boolean argument, defaulting to false.
+// boolArg pulls a boolean argument, defaulting to false. It accepts the shapes
+// a model actually emits: a real bool, a number (0/1), or the strings "true" /
+// "false".
 func boolArg(input map[string]any, key string) bool {
-	raw, ok := input[key]
-	if !ok {
-		return false
-	}
-	if v, ok := raw.(bool); ok {
+	switch v := input[key].(type) {
+	case bool:
 		return v
+	case float64:
+		return v != 0
+	case int:
+		return v != 0
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1", "yes":
+			return true
+		}
 	}
 	return false
 }
