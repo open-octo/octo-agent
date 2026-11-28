@@ -3290,7 +3290,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       </div>
 
       {#if railTicks.length > 1}
-        <div class="msg-rail">
+        <div class="msg-rail" class:has-jump={showJumpBottom}>
           <div class="msg-rail-inner" style="height:min(100%, {railTicks.length * 28 - 20}px);--rail-scale:{railScale}">
             <div class="msg-rail-track"></div>
             <div class="msg-rail-fill" style="height:calc((100% - 8px) * {railFillPct / 100})"></div>
@@ -3314,8 +3314,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         </div>
       {/if}
 
-      <!-- One-click return to the latest message; visible only when the view
-           has left the near-bottom band (see updateJumpBottom). -->
+      <!-- One-click return to the latest message, docked on the user-message
+           rail's axis at its bottom end: the rail is a timeline, so its bottom
+           terminus IS "latest". Rendered independently of the rail itself so a
+           single-message long turn (no ticks yet) still gets the affordance. -->
       {#if showJumpBottom}
         <button
           type="button"
@@ -3324,7 +3326,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           aria-label={$t('chat.jump_to_bottom')}
           onclick={jumpToBottom}
         >
-          <iconify-icon icon="lucide:arrow-down" width="16"></iconify-icon>
+          <iconify-icon icon="lucide:arrow-down" width="13"></iconify-icon>
         </button>
       {/if}
       </div>
@@ -3584,7 +3586,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   right: max(22px, calc((100% - var(--chat-content-max-width)) / 4));
   pointer-events: none; z-index: 8;
   display: flex; align-items: center; justify-content: center;
+  transition: bottom 0.15s ease;
 }
+/* While the jump-to-bottom button is docked at the rail's bottom end, lift the
+   node column so its last node never sits under the button. */
+.msg-rail.has-jump { bottom: 44px; }
 /* Evenly-spaced node column, centered; track + fill are scoped to its height.
    Height is set inline to min(100%, natural length) — natural = 8px per node +
    20px per gap (28 * N - 20) — so on short panes the column compresses evenly
@@ -3681,38 +3687,26 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 }
 
 /* ── Jump-to-bottom button ───────────────────────────────────────────────── */
-/* Floated at the bottom-center of the scroll area, above the composer. Same
-   bordered-chip language as the landing app shortcuts; a soft shadow keeps it
-   readable over message content. */
+/* Docked on the rail's axis (same right-gutter formula, offset so the 24px
+   circle centers on the 20px rail column), pinned to its bottom end: the
+   rail's last position is the latest message, and this is the one-click way
+   there. Deliberately inside the rail column rather than floating over the
+   message area — it reads as the timeline's terminus, and rail hover previews
+   (which extend LEFT of the rail) can never overlap it. */
 .jump-bottom {
-  position: absolute; bottom: 14px; left: 50%;
-  transform: translateX(-50%);
-  width: 32px; height: 32px; border-radius: 50%;
+  position: absolute; bottom: 8px;
+  right: max(20px, calc((100% - var(--chat-content-max-width)) / 4 - 2px));
+  width: 24px; height: 24px; border-radius: 50%;
   border: 1px solid var(--border); background: var(--bg-container);
   box-shadow: var(--card-shadow);
   display: flex; align-items: center; justify-content: center;
   color: var(--text-secondary); cursor: pointer; z-index: 9;
-  /* Local keyframe instead of octo-fadein: that one animates `transform`
-     translateY(4px) → none, which would override translateX(-50%) for the
-     animation's duration and snap the button sideways when it ends. */
-  animation: jump-bottom-in 0.15s ease;
-  transition: border-color 0.15s, color 0.15s, opacity 0.15s;
-}
-@keyframes jump-bottom-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
-  to { opacity: 1; transform: translateX(-50%); }
+  animation: octo-fadein 0.15s ease;
+  transition: border-color 0.15s, color 0.15s;
 }
 .jump-bottom:hover { border-color: var(--blue-2); color: var(--blue-6); }
-/* A rail node's hover preview extends up to 260px left of the rail; on narrow
-   panes, hovering a node near the bottom would otherwise draw the dark tooltip
-   right over this button. The cursor is on the rail in that moment, so fade
-   the button out instead of letting the two overlap. */
-.messages-wrap:has(.msg-rail-node:hover) .jump-bottom,
-.messages-wrap:has(.msg-rail-node:focus-visible) .jump-bottom {
-  opacity: 0; pointer-events: none;
-}
 @media (prefers-reduced-motion: reduce) {
-  .jump-bottom { animation: none; transition: none; }
+  .jump-bottom, .msg-rail { animation: none; transition: none; }
 }
 .messages-inner {
   max-width: var(--chat-content-max-width); margin: 0 auto;
