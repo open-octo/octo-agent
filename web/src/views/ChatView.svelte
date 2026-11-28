@@ -3722,11 +3722,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
    size makes a row keep its last measured height once it has been on screen.
    A row never seen yet sits at the placeholder height, and when it renders
    while you scroll up through history, scroll anchoring is what keeps the
-   view still. WebKit has no scroll anchoring (macOS shell, iOS): there the
-   view jumped by up to a row's height per step, so the rule is gated on
-   support. This also paint-contains each row: anything absolutely
-   positioned inside one must stay within its box. */
-@supports (overflow-anchor: auto) {
+   view still. This also paint-contains each row: anything absolutely
+   positioned inside one must stay within its box.
+
+   Gated on BOTH capabilities, because each engine needs both halves:
+   - `overflow-anchor`: a skipped row is sized from its placeholder until it
+     renders, so without scroll anchoring the view jumps by up to a row's
+     height per step while scrolling up.
+   - not WebKit: WebKit shipped overflow-anchor in Safari/macOS 26, so the
+     original `@supports (overflow-anchor: auto)` gate stopped excluding it —
+     and its fresh content-visibility implementation leaves a stale paint when
+     a row's content shrinks while the row is skipped (a collapsed tool card
+     painted as a blank block of its old height until the next scroll). The
+     `font: -apple-system-body` shorthand is WebKit-only, so negating it keeps
+     the optimisation on Chromium and Gecko and off the desktop webview. */
+@supports ((overflow-anchor: auto) and (not (font: -apple-system-body))) {
   .messages-inner:not(.no-session) > :global(*) {
     content-visibility: auto;
     contain-intrinsic-size: auto 160px;
