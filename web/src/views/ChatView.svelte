@@ -1585,11 +1585,12 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       ticks.push({ id: m.id, preview: (m.content || '').slice(0, 160) })
     }
     railTicks = ticks
-    // Compression factor: available rail height (pane minus the 8px top/bottom
-    // insets of .msg-rail) over the column's natural length (28px per node
-    // minus the trailing gap). Clamped to 1 so uncompressed panes are unscaled.
+    // Compression factor: available rail height (pane minus the 8px top inset
+    // and the 36px bottom reservation for the jump-to-latest arrow) over the
+    // column's natural length (28px per node minus the trailing gap). Clamped
+    // to 1 so uncompressed panes are unscaled.
     const natural = ticks.length * 28 - 20
-    const avail = (messagesEl?.clientHeight ?? 0) - 16
+    const avail = (messagesEl?.clientHeight ?? 0) - 44
     railScale = ticks.length > 1 && avail > 0 ? Math.min(1, avail / natural) : 1
     syncRailScroll()
   }
@@ -1694,17 +1695,20 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     cancelJumpSettle = settleScroll(sc, el, offset)
   }
 
-  // ── jump-to-bottom button ──────────────────────────────────────────────────
-  // Floating affordance shown while the view sits above the near-bottom band
-  // (the same 80px the auto-scroll stick logic uses) so a long transcript can
-  // be re-pinned with one click. Clicking re-engages stick, so a streaming
-  // reply keeps the view pinned afterwards instead of just teleporting once.
-  let showJumpBottom = $state(false)
+  // ── jump-to-bottom arrow ───────────────────────────────────────────────────
+  // A bare arrow docked at the bottom end of the rail's axis, permanently
+  // resident in its own fixed slot (the rail reserves the space whether or not
+  // the arrow is active, so the timeline never shifts). It doubles as a state
+  // indicator: breathing blue halo while the view is above the near-bottom
+  // band (the same 80px the auto-scroll stick logic uses), dim and disabled
+  // once the latest message is reached. Clicking re-engages stick, so a
+  // streaming reply keeps the view pinned afterwards instead of teleporting.
+  let awayFromBottom = $state(false)
 
   function updateJumpBottom() {
     const sc = messagesEl
     if (!sc) return
-    showJumpBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight >= 80
+    awayFromBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight >= 80
   }
 
   function jumpToBottom() {
@@ -1718,7 +1722,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     cancelJumpSettle?.()
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     sc.scrollTo({ top: sc.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
-    showJumpBottom = false
   }
 
   $effect(() => {
@@ -3290,7 +3293,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       </div>
 
       {#if railTicks.length > 1}
-        <div class="msg-rail" class:has-jump={showJumpBottom}>
+        <div class="msg-rail">
           <div class="msg-rail-inner" style="height:min(100%, {railTicks.length * 28 - 20}px);--rail-scale:{railScale}">
             <div class="msg-rail-track"></div>
             <div class="msg-rail-fill" style="height:calc((100% - 8px) * {railFillPct / 100})"></div>
@@ -3314,20 +3317,23 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
         </div>
       {/if}
 
-      <!-- One-click return to the latest message, docked on the user-message
-           rail's axis at its bottom end: the rail is a timeline, so its bottom
-           terminus IS "latest". Rendered independently of the rail itself so a
-           single-message long turn (no ticks yet) still gets the affordance. -->
-      {#if showJumpBottom}
-        <button
-          type="button"
-          class="jump-bottom"
-          title={$t('chat.jump_to_bottom')}
-          aria-label={$t('chat.jump_to_bottom')}
-          onclick={jumpToBottom}
-        >
-          <iconify-icon icon="lucide:arrow-down" width="13"></iconify-icon>
-        </button>
+      <!-- Return-to-latest arrow, permanently docked in the rail's bottom
+           slot (the rail reserves this space even with no ticks, so the
+           timeline's geometry never shifts). Breathing blue = you're above
+           the latest message; dim = already there. Not rendered on the
+           landing page — no transcript to return to. -->
+      {#if id}
+      <button
+        type="button"
+        class="jump-bottom"
+        class:away={awayFromBottom}
+        title={$t('chat.jump_to_bottom')}
+        aria-label={$t('chat.jump_to_bottom')}
+        disabled={!awayFromBottom}
+        onclick={jumpToBottom}
+      >
+        <iconify-icon icon="lucide:arrow-down" width="14"></iconify-icon>
+      </button>
       {/if}
       </div>
 
@@ -3582,15 +3588,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
      to a fixed offset on narrow panes, staying clear of the native scrollbar
      track (app.css sets it to 8px). Vertically centers the node column within
      the conversation area. */
-  position: absolute; top: 8px; bottom: 8px; width: 20px;
+  /* The bottom 36px are the permanent slot of the jump-to-latest arrow below
+     (28px for the arrow + the 8px inset). Reserved whether or not the arrow
+     is active: the timeline is a reference object and must never shift when
+     the arrow's state changes. */
+  position: absolute; top: 8px; bottom: 36px; width: 20px;
   right: max(22px, calc((100% - var(--chat-content-max-width)) / 4));
   pointer-events: none; z-index: 8;
   display: flex; align-items: center; justify-content: center;
-  transition: bottom 0.15s ease;
 }
-/* While the jump-to-bottom button is docked at the rail's bottom end, lift the
-   node column so its last node never sits under the button. */
-.msg-rail.has-jump { bottom: 44px; }
 /* Evenly-spaced node column, centered; track + fill are scoped to its height.
    Height is set inline to min(100%, natural length) — natural = 8px per node +
    20px per gap (28 * N - 20) — so on short panes the column compresses evenly
@@ -3686,27 +3692,36 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   .msg-rail-tip { animation: none; }
 }
 
-/* ── Jump-to-bottom button ───────────────────────────────────────────────── */
-/* Docked on the rail's axis (same right-gutter formula, offset so the 24px
-   circle centers on the 20px rail column), pinned to its bottom end: the
-   rail's last position is the latest message, and this is the one-click way
-   there. Deliberately inside the rail column rather than floating over the
-   message area — it reads as the timeline's terminus, and rail hover previews
-   (which extend LEFT of the rail) can never overlap it. */
+/* ── Jump-to-latest arrow ────────────────────────────────────────────────── */
+/* A bare arrow — no disc, no border — on the rail's axis (same right-gutter
+   formula, centered on the 20px column), permanently occupying the bottom
+   slot the rail reserves. Shape and color carry the distinction from the
+   neutral position dots: those are static grey circles, this is a blue arrow
+   with a slow breathing halo while there is content below. Rail hover
+   previews extend LEFT of the rail, so they can never overlap it. */
 .jump-bottom {
   position: absolute; bottom: 8px;
-  right: max(20px, calc((100% - var(--chat-content-max-width)) / 4 - 2px));
-  width: 24px; height: 24px; border-radius: 50%;
-  border: 1px solid var(--border); background: var(--bg-container);
-  box-shadow: var(--card-shadow);
+  right: max(22px, calc((100% - var(--chat-content-max-width)) / 4));
+  width: 20px; height: 20px; padding: 0; border-radius: 50%;
+  border: none; background: transparent;
   display: flex; align-items: center; justify-content: center;
-  color: var(--text-secondary); cursor: pointer; z-index: 9;
-  animation: octo-fadein 0.15s ease;
-  transition: border-color 0.15s, color 0.15s;
+  color: var(--text-quaternary); cursor: default; z-index: 9;
+  transition: color 0.2s;
 }
-.jump-bottom:hover { border-color: var(--blue-2); color: var(--blue-6); }
+.jump-bottom.away {
+  color: var(--blue-6); cursor: pointer;
+  animation: jump-breathe 2.4s ease-in-out infinite;
+}
+.jump-bottom.away:hover { color: var(--blue-5); }
+/* Halo breath: a soft focus-ring glow swelling and settling around the arrow,
+   2.4s per cycle. Icon itself stays put — no motion sickness, just a pulse. */
+@keyframes jump-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px var(--focus-ring); }
+  50% { box-shadow: 0 0 0 7px var(--focus-ring); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .jump-bottom, .msg-rail { animation: none; transition: none; }
+  .jump-bottom.away { animation: none; }
+  .jump-bottom { transition: none; }
 }
 .messages-inner {
   max-width: var(--chat-content-max-width); margin: 0 auto;
