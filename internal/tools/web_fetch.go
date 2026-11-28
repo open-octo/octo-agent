@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -64,7 +65,9 @@ func (WebFetchTool) Definition() agent.ToolDefinition {
 			"Public web only — no authentication.\n\n" +
 			"If a URL returns 403/404 even though it works in a browser (hotlink/anti-bot " +
 			"checks), set `referer` — e.g. the page's own origin (https://example.com) or the " +
-			"search engine you found it from — or override `user_agent`.",
+			"search engine you found it from — or override `user_agent`. With " +
+			"DEEPSEEK_API_KEY set, a failed direct GET is retried through DeepSeek's Fetch " +
+			"API, which returns the page as Markdown (costs $0.75/1000 fetches, empty pages free).",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -133,10 +136,147 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 	out, err := fetchDirect(directCtx, raw, referer, userAgent, clean)
 	directCancel()
 	if err != nil {
+		// A failed direct GET is the common anti-bot/hotlink wall. Retry it
+		// through DeepSeek's Fetch API when a key is set and the URL is fit to
+		// hand to a third party; see fetchViaDeepSeek for why that guard exists.
+		if fb, fbErr, attempted := fetchViaDeepSeek(ctx, raw, clean, u, err); attempted {
+			if fbErr == nil {
+				fb.UI = webFetchUI(raw, fb.Text)
+				return fb, nil
+			}
+			return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w (DeepSeek fallback also failed: %v)", err, fbErr)
+		}
 		return agent.ToolResult{Text: ""}, fmt.Errorf("web_fetch: %w", err)
 	}
 	out.UI = webFetchUI(raw, out.Text)
 	return out, nil
+}
+
+// ───────────────────── DeepSeek Fetch fallback ─────────────────────
+
+// deepSeekFetchNote leads the text of a fallback result. The model has to know
+// the page came from a third-party extraction triggered by a failed direct GET:
+// the content is the provider's rendering, not the live document the caller
+// asked for, and the failed status explains why it may look different.
+const deepSeekFetchNote = "web_fetch: direct GET failed (%v) — retrieved through the DeepSeek Fetch API instead; content is that service's extraction, not the live page."
+
+// thirdPartyFetchAllowed reports whether u is safe to hand to an external
+// fetch service. It is a var so tests — which serve from 127.0.0.1 — can
+// exercise the fallback without a public host.
+var thirdPartyFetchAllowed = publicFetchTarget
+
+// publicFetchTarget reports whether every address u resolves to is public
+// internet. The direct path deliberately permits loopback and private-LAN
+// destinations (fetching your own dev server is normal), but the same URL sent
+// to DeepSeek would leak an internal address to a third party — and would not
+// resolve on their side anyway — so the fallback refuses those.
+func publicFetchTarget(ctx context.Context, u *url.URL) bool {
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return publicFetchIP(ip)
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, a := range addrs {
+		if !publicFetchIP(a.IP) {
+			return false
+		}
+	}
+	return true
+}
+
+// publicFetchIP is publicFetchTarget's per-address rule. Unspecified (0.0.0.0)
+// counts as non-public on purpose: a URL aiming at it is a scanning attempt.
+func publicFetchIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast())
+}
+
+// fetchViaDeepSeek retries a failed direct fetch through
+// POST /v1/tools/fetch, which returns the page as Markdown.
+//
+// attempted=false means the fallback did not apply at all — no DEEPSEEK_API_KEY,
+// the caller wanted raw markup (clean=false; the API only returns Markdown, so
+// answering a raw request with Markdown would be the wrong content), or the URL
+// is not a public target. Callers keep their original error in that case.
+//
+// Billing: $0.75/1000 successful fetches; failed requests and pages with no
+// extractable content are not billed.
+func fetchViaDeepSeek(ctx context.Context, rawURL string, clean bool, u *url.URL, cause error) (agent.ToolResult, error, bool) {
+	if !clean {
+		return agent.ToolResult{}, nil, false
+	}
+	if os.Getenv("DEEPSEEK_API_KEY") == "" {
+		return agent.ToolResult{}, nil, false
+	}
+	if !thirdPartyFetchAllowed(ctx, u) {
+		return agent.ToolResult{}, nil, false
+	}
+
+	body, _ := json.Marshal(map[string]any{"url": rawURL})
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodPost, deepseekFetchEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return agent.ToolResult{}, fmt.Errorf("build request: %w", err), true
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("DEEPSEEK_API_KEY"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := webHTTPClient().Do(req)
+	if err != nil {
+		return agent.ToolResult{}, fmt.Errorf("deepseek fetch: %w", err), true
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return agent.ToolResult{}, fmt.Errorf("deepseek fetch: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw))), true
+	}
+	var data struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, WebFetchMaxBytes)).Decode(&data); err != nil {
+		return agent.ToolResult{}, fmt.Errorf("deepseek fetch: decode: %w", err), true
+	}
+	if strings.TrimSpace(data.Content) == "" {
+		return agent.ToolResult{}, fmt.Errorf("deepseek fetch: no extractable content"), true
+	}
+
+	// Same size discipline as the direct path: cap, then inline-or-spill.
+	content := []byte(data.Content)
+	truncated := false
+	if len(content) > WebFetchMaxBytes {
+		content = content[:WebFetchMaxBytes]
+		truncated = true
+	}
+	note := fmt.Sprintf(deepSeekFetchNote, cause)
+	full := append([]byte(note+"\n\n"), content...)
+	out, err := deliverBody(full, rawURL, "text/markdown", truncated)
+	if err != nil {
+		return agent.ToolResult{}, err, true
+	}
+	return out, nil, true
+}
+
+// deliverBody applies the inline-vs-spill rule to an already-extracted body:
+// within WebFetchInlineBytes it goes back verbatim, larger bodies are written
+// to a temp file and summarised.
+func deliverBody(body []byte, sourceURL, contentType string, truncated bool) (agent.ToolResult, error) {
+	if len(body) <= WebFetchInlineBytes {
+		return agent.ToolResult{Text: string(body)}, nil
+	}
+	return spillWebFetch(body, sourceURL, contentType, truncated)
 }
 
 // webFetchUI builds the "web_fetch" UI payload. Title and status code are
@@ -237,14 +377,9 @@ func readBody(r io.Reader, sourceURL string, finalURL *url.URL, contentType stri
 		}
 	}
 
-	// Within the inline budget — return it directly. An inline body is always
-	// well under WebFetchMaxBytes, so it is never truncated here.
-	if len(body) <= WebFetchInlineBytes {
-		return agent.ToolResult{Text: string(body)}, nil
-	}
-
-	// Larger — spill the full body to a temp file and return a preview summary.
-	return spillWebFetch(body, sourceURL, contentType, truncated)
+	// Body extraction is done; the inline-vs-spill decision lives in
+	// deliverBody so the DeepSeek fallback shares it.
+	return deliverBody(body, sourceURL, contentType, truncated)
 }
 
 // decodeToUTF8 converts a response body to UTF-8. html.Parse — and the model

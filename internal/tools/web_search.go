@@ -33,12 +33,13 @@ const WebSearchHardMax = 20
 // Backend endpoints. These are vars (not consts) so tests can redirect
 // each backend at an httptest server. Production keeps the defaults.
 var (
-	deepseekEndpoint = "https://api.deepseek.com/v1/tools/search"
-	braveEndpoint    = "https://api.search.brave.com/res/v1/web/search"
-	tavilyEndpoint   = "https://api.tavily.com/search"
-	serperEndpoint   = "https://google.serper.dev/search"
-	ddgEndpoint      = "https://html.duckduckgo.com/html/"
-	bingEndpoint     = "https://cn.bing.com/search"
+	deepseekEndpoint      = "https://api.deepseek.com/v1/tools/search"
+	deepseekFetchEndpoint = "https://api.deepseek.com/v1/tools/fetch"
+	braveEndpoint         = "https://api.search.brave.com/res/v1/web/search"
+	tavilyEndpoint        = "https://api.tavily.com/search"
+	serperEndpoint        = "https://google.serper.dev/search"
+	ddgEndpoint           = "https://html.duckduckgo.com/html/"
+	bingEndpoint          = "https://cn.bing.com/search"
 )
 
 // WebSearchResult is a single normalised search hit. All six backends
