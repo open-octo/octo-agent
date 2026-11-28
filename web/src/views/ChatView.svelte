@@ -1722,9 +1722,13 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     if (!sc || !content) return
     // Scroll covers user gestures; the ResizeObserver covers content growing
     // under an unpinned view (a streaming reply while reading history), which
-    // fires no scroll event.
+    // fires no scroll event. Also watch the scroll pane itself: a height-only
+    // viewport resize changes clientHeight — and therefore distance-to-bottom —
+    // without reflowing the content, so observing the content alone would miss
+    // it (same case the rail effect handles above).
     const ro = new ResizeObserver(updateJumpBottom)
     ro.observe(content)
+    ro.observe(sc)
     sc.addEventListener('scroll', updateJumpBottom, { passive: true })
     updateJumpBottom()
     return () => {
@@ -3683,8 +3687,15 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   box-shadow: var(--card-shadow);
   display: flex; align-items: center; justify-content: center;
   color: var(--text-secondary); cursor: pointer; z-index: 9;
-  animation: octo-fadein 0.15s ease;
+  /* Local keyframe instead of octo-fadein: that one animates `transform`
+     translateY(4px) → none, which would override translateX(-50%) for the
+     animation's duration and snap the button sideways when it ends. */
+  animation: jump-bottom-in 0.15s ease;
   transition: border-color 0.15s, color 0.15s;
+}
+@keyframes jump-bottom-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to { opacity: 1; transform: translateX(-50%); }
 }
 .jump-bottom:hover { border-color: var(--blue-2); color: var(--blue-6); }
 @media (prefers-reduced-motion: reduce) {
