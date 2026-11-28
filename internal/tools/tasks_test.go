@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -132,10 +133,43 @@ func TestTaskUpdateTool_Execute_PartialUpdate(t *testing.T) {
 func TestTaskUpdateTool_Execute_RejectsNoFields(t *testing.T) {
 	store := useTaskStore(t)
 	id, _ := store.Create("task", "", "")
-	if _, err := (TaskUpdateTool{}).Execute(context.Background(), "task_update", map[string]any{
+	_, err := (TaskUpdateTool{}).Execute(context.Background(), "task_update", map[string]any{
 		"task_id": float64(id),
-	}); err == nil || !strings.Contains(err.Error(), "nothing to update") {
-		t.Errorf("expected 'nothing to update' error, got %v", err)
+	})
+	if err == nil || !strings.Contains(err.Error(), "nothing to update") {
+		t.Fatalf("expected 'nothing to update' error, got %v", err)
+	}
+	// The message must name what arrived and show a call that would work —
+	// otherwise a model retries the identical bare task_id call forever.
+	msg := err.Error()
+	for _, want := range []string{"received keys: task_id", `"status": "completed"`} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error should contain %q, got %q", want, msg)
+		}
+	}
+	if !strings.Contains(msg, fmt.Sprintf(`"task_id": %d`, id)) {
+		t.Errorf("example should reuse the received task_id, got %q", msg)
+	}
+}
+
+// A mistyped field name is the case the key list earns its keep: the message
+// has to show that "stats" arrived instead of "status", so the model can fix
+// the spelling rather than resend the same call.
+func TestTaskUpdateTool_Execute_ReportsMistypedKey(t *testing.T) {
+	store := useTaskStore(t)
+	id, _ := store.Create("task", "", "")
+	_, err := (TaskUpdateTool{}).Execute(context.Background(), "task_update", map[string]any{
+		"task_id": float64(id),
+		"stats":   "completed",
+	})
+	if err == nil {
+		t.Fatal("expected an error for a call with no recognised field")
+	}
+	if !strings.Contains(err.Error(), "received keys: stats, task_id") {
+		t.Errorf("error should list the keys that arrived, got %q", err.Error())
+	}
+	if got, _ := store.Get(id); got.Status != tasks.Pending {
+		t.Errorf("Status = %q, want the task left untouched", got.Status)
 	}
 }
 
