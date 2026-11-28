@@ -1694,6 +1694,49 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     cancelJumpSettle = settleScroll(sc, el, offset)
   }
 
+  // ── jump-to-bottom button ──────────────────────────────────────────────────
+  // Floating affordance shown while the view sits above the near-bottom band
+  // (the same 80px the auto-scroll stick logic uses) so a long transcript can
+  // be re-pinned with one click. Clicking re-engages stick, so a streaming
+  // reply keeps the view pinned afterwards instead of just teleporting once.
+  let showJumpBottom = $state(false)
+
+  function updateJumpBottom() {
+    const sc = messagesEl
+    if (!sc) return
+    showJumpBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight >= 80
+  }
+
+  function jumpToBottom() {
+    const sc = messagesEl
+    if (!sc) return
+    stick = true
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    sc.scrollTo({ top: sc.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
+    showJumpBottom = false
+  }
+
+  $effect(() => {
+    const sc = messagesEl
+    const content = innerEl
+    if (!sc || !content) return
+    // Scroll covers user gestures; the ResizeObserver covers content growing
+    // under an unpinned view (a streaming reply while reading history), which
+    // fires no scroll event. Also watch the scroll pane itself: a height-only
+    // viewport resize changes clientHeight — and therefore distance-to-bottom —
+    // without reflowing the content, so observing the content alone would miss
+    // it (same case the rail effect handles above).
+    const ro = new ResizeObserver(updateJumpBottom)
+    ro.observe(content)
+    ro.observe(sc)
+    sc.addEventListener('scroll', updateJumpBottom, { passive: true })
+    updateJumpBottom()
+    return () => {
+      ro.disconnect()
+      sc.removeEventListener('scroll', updateJumpBottom)
+    }
+  })
+
   // ── markdown copy buttons + mermaid diagrams setup ─────────────────────────
   function setupAssistantEl(el: HTMLElement) {
     const copy = setupCopyButtons(el)
@@ -3265,6 +3308,20 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
           </div>
         </div>
       {/if}
+
+      <!-- One-click return to the latest message; visible only when the view
+           has left the near-bottom band (see updateJumpBottom). -->
+      {#if showJumpBottom}
+        <button
+          type="button"
+          class="jump-bottom"
+          title={$t('chat.jump_to_bottom')}
+          aria-label={$t('chat.jump_to_bottom')}
+          onclick={jumpToBottom}
+        >
+          <iconify-icon icon="lucide:arrow-down" width="16"></iconify-icon>
+        </button>
+      {/if}
       </div>
 
       <!-- Background workflows panel (persists across turns, pinned above composer) -->
@@ -3616,6 +3673,33 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 @media (prefers-reduced-motion: reduce) {
   .msg-rail-fill, .msg-rail-dot { transition: none; }
   .msg-rail-tip { animation: none; }
+}
+
+/* ── Jump-to-bottom button ───────────────────────────────────────────────── */
+/* Floated at the bottom-center of the scroll area, above the composer. Same
+   bordered-chip language as the landing app shortcuts; a soft shadow keeps it
+   readable over message content. */
+.jump-bottom {
+  position: absolute; bottom: 14px; left: 50%;
+  transform: translateX(-50%);
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg-container);
+  box-shadow: var(--card-shadow);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); cursor: pointer; z-index: 9;
+  /* Local keyframe instead of octo-fadein: that one animates `transform`
+     translateY(4px) → none, which would override translateX(-50%) for the
+     animation's duration and snap the button sideways when it ends. */
+  animation: jump-bottom-in 0.15s ease;
+  transition: border-color 0.15s, color 0.15s;
+}
+@keyframes jump-bottom-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
+.jump-bottom:hover { border-color: var(--blue-2); color: var(--blue-6); }
+@media (prefers-reduced-motion: reduce) {
+  .jump-bottom { animation: none; transition: none; }
 }
 .messages-inner {
   max-width: var(--chat-content-max-width); margin: 0 auto;
