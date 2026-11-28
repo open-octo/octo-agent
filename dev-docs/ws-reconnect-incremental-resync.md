@@ -63,8 +63,8 @@ Session JSONL 首行 meta record 新增字段 `history_epoch`（int，缺省 0�
 `sessionRecord`、`metaRecord()`、`LoadSession` 的 meta case 共四处。
 
 **不**逐调用点手动 +1，而是在 `Session.Save()` 里自动检测：`len(Messages) <
-persisted`（盘上条数多于内存）就是一次破坏性收缩，rewriteAll 前将 epoch +1。
-这天然覆盖所有重写路径，无遗漏风险：
+persisted`（破坏性收缩）或 `rewriteIsContent`（SyncFrom 报告的同长度内容重写）
+都会在 rewriteAll 前将 epoch +1。这天然覆盖所有重写路径，无遗漏风险：
 
 - handleEditMessage（TruncateTo 后 Save）、handleWSRetry、handleWSRollback
   （截短后 Save，靠 `len < persisted` 触发 rewrite）
@@ -74,8 +74,9 @@ persisted`（盘上条数多于内存）就是一次破坏性收缩，rewriteAll
 - 首轮失败回滚（popLast 后 SyncFrom 变短）
 
 只追加的 turn（含 interrupt：只追加 interrupt note，不删消息）不触发。
-epoch 的正确性只要求"重写后值变化"，不要求严格递增——并发丢增也仍然不等于
-客户端缓存值，降级依然触发。
+epoch 的正确性依赖同一 session 的破坏性写入被现有 turn/binding 机制串行化；
+它不是并发写令牌。如果未来允许多个持有旧 Session 副本的写入者并发重写，
+计数器可能从不同旧值计算出同一个新值，届时应改为每次重写生成唯一版本标识。
 
 ### 服务端：messages 端点增量参数
 

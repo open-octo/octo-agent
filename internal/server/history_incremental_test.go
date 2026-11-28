@@ -186,6 +186,62 @@ func TestHandleGetSessionMessages_AfterBeyondHistoryFallsBack(t *testing.T) {
 	}
 }
 
+// TestHandleGetSessionMessages_WatermarkCursor covers the subtlest cursor
+// transition: a load during a running turn caches history_len at the watermark,
+// excluding the in-flight turn's own messages. Once the turn completes and the
+// cap lifts, an incremental request from that cursor must serve exactly those
+// formerly-hidden messages, with their absolute indices.
+func TestHandleGetSessionMessages_WatermarkCursor(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	sess := seedHistorySession(t)
+	srv := mustServer(t, Config{Addr: "127.0.0.1:0", Tools: false})
+	srv.initWS()
+
+	// The second turn is in flight: only the first user/assistant round predates
+	// its watermark, even though progress has already persisted all four messages.
+	srv.liveStateMu.Lock()
+	srv.liveStates[sess.ID] = &sessionLiveState{historyWatermark: 2}
+	srv.liveStateMu.Unlock()
+
+	capped := getMessages(t, srv, sess.ID, "")
+	if capped.HistoryLen != 2 || len(capped.Events) != 2 {
+		t.Fatalf("mid-turn response: history_len=%d events=%d, want 2/2", capped.HistoryLen, len(capped.Events))
+	}
+
+	// Reconnecting while the same turn still runs must not make the tail overlap
+	// the WS replay: after=2 is exactly the cap, so the incremental tail is empty.
+	midTurn := getMessages(t, srv, sess.ID, "?after=2&epoch=0")
+	if !midTurn.Incremental || len(midTurn.Events) != 0 || midTurn.HistoryLen != 2 {
+		t.Fatalf("mid-turn incremental response = incremental:%v events:%d history_len:%d, want true/0/2",
+			midTurn.Incremental, len(midTurn.Events), midTurn.HistoryLen)
+	}
+
+	// The turn finishes: its persisted rounds become history and the watermark
+	// goes away with the live state.
+	srv.liveStateMu.Lock()
+	delete(srv.liveStates, sess.ID)
+	srv.liveStateMu.Unlock()
+
+	resumed := getMessages(t, srv, sess.ID, "?after=2&epoch=0")
+	if !resumed.Incremental {
+		t.Fatal("the capped cursor must remain valid after the turn completes")
+	}
+	if len(resumed.Events) != 2 {
+		t.Fatalf("events = %d, want 2 (the formerly-hidden turn); events=%v", len(resumed.Events), resumed.Events)
+	}
+	if resumed.Events[0]["content"] != "second question" || resumed.Events[1]["content"] != "second answer" {
+		t.Fatalf("tail content = %v / %v, want the second turn", resumed.Events[0]["content"], resumed.Events[1]["content"])
+	}
+	for i, ev := range resumed.Events {
+		if idx, ok := ev["message_index"].(float64); !ok || int(idx) != i+2 {
+			t.Fatalf("tail event %d message_index = %v, want %d", i, ev["message_index"], i+2)
+		}
+	}
+}
+
 // TestHandleGetSessionMessages_MalformedCursorFallsBack: garbage parameters
 // answer a full response, keeping old or hand-crafted clients unaffected.
 func TestHandleGetSessionMessages_MalformedCursorFallsBack(t *testing.T) {

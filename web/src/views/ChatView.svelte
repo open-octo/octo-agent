@@ -486,13 +486,6 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // Server-resolved, so it's correct even before $sessions has loaded —
       // see the comment on the 'thinking' branch in handleHistoryEvent.
       const historyShowReasoning = resp?.show_reasoning ?? true
-      // Persisted-history cursor for the next reconnect resync. An older
-      // server omits both fields; the position request to it just returns a
-      // full response, and the next resync then retries incrementally only
-      // once real cursor values are cached here.
-      if (typeof resp?.history_len === 'number' && typeof resp?.epoch === 'number') {
-        setHistoryPos(sid, { after: resp.history_len, epoch: resp.epoch })
-      }
       const incremental = resp?.incremental === true
       // Live events can land while the fetch is in flight — after a rollback
       // the rerun is already streaming, and on reconnect the subscribe replay
@@ -526,6 +519,14 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       // the live tail from. Read the length back from the store: some events
       // render nothing (empty assistant rounds), so it is not events.length.
       setHistoryPrefixLen(sid, (get(chatMessages)[sid] ?? []).length)
+      // Cache the cursor only after every history event rendered successfully:
+      // advancing it earlier would claim messages were consumed even if a
+      // render threw, leaving a silent hole until the next full reload. An
+      // older server omits both fields, so the next resync retries incrementally
+      // only once real cursor values are cached here.
+      if (typeof resp?.history_len === 'number' && typeof resp?.epoch === 'number') {
+        setHistoryPos(sid, { after: resp.history_len, epoch: resp.epoch })
+      }
       if (live.length) {
         chatMessages.update(m => ({ ...m, [sid]: appendLiveAfterHistory(m[sid] ?? [], live) }))
       }

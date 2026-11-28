@@ -103,27 +103,32 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
 // tail is dropped up front, since it is rebuildable (completed turns re-render
 // from the fetched history, a running turn from the subscribe replay) and
 // keeping it would duplicate against both.
+// historyLoadGen makes only the newest load for a session allowed to write.
+// Unlike the old always-clear full reload, an incremental append is not
+// idempotent: without this guard, two overlapping reconnects render the same
+// tail twice (or an older response moves the persisted cursor backwards).
+const historyLoadGen = new Map<string, number>()
+
 export function loadMobileHistory(sid: string, resync = false): Promise<void> {
+  const gen = (historyLoadGen.get(sid) ?? 0) + 1
+  historyLoadGen.set(sid, gen)
+  const isStale = () => historyLoadGen.get(sid) !== gen
   api.getSessionGoal(sid)
     .then(resp => chatGoal.update(m => ({ ...m, [sid]: resp?.goal ?? null })))
     .catch(() => {})
   // The persisted sub-agent / workflow trails, so a finished run's tool card
   // can show what it did; an older server just leaves the card's plain result.
   api.getAgentRuns(sid)
-    .then((resp: any) => hydrateAgentRuns(sid, resp))
+    .then((resp: any) => { if (!isStale()) hydrateAgentRuns(sid, resp) })
     .catch(() => {})
   chatMessages.update(m => {
     const msgs = m[sid] ?? []
     return { ...m, [sid]: msgs.slice(0, Math.min(historyPrefixLen(sid), msgs.length)) }
   })
   return api.getSessionMessages(sid, resync ? getHistoryPos(sid) ?? undefined : undefined).then((resp: any) => {
+    if (isStale()) return
     const events: any[] = resp?.events ?? []
     const showReasoning = resp?.show_reasoning ?? true
-    // Cursor for the next reconnect resync; an older server omits both fields
-    // and the next resync simply asks for the full transcript again.
-    if (typeof resp?.history_len === 'number' && typeof resp?.epoch === 'number') {
-      setHistoryPos(sid, { after: resp.history_len, epoch: resp.epoch })
-    }
     const incremental = resp?.incremental === true
     // After a rollback the rerun is already streaming while this fetch is in
     // flight; render history first, then put the live messages back behind
@@ -145,6 +150,13 @@ export function loadMobileHistory(sid: string, resync = false): Promise<void> {
     }
     finishToolsById(sid, historyToolIds)
     setHistoryPrefixLen(sid, (get(chatMessages)[sid] ?? []).length)
+    // Cache the cursor only after every history event rendered successfully:
+    // advancing it earlier would claim messages were consumed even if a render
+    // threw, leaving a silent hole until the next full reload. An older server
+    // omits both fields, so the next resync simply asks for the full transcript.
+    if (typeof resp?.history_len === 'number' && typeof resp?.epoch === 'number') {
+      setHistoryPos(sid, { after: resp.history_len, epoch: resp.epoch })
+    }
     if (live.length) {
       chatMessages.update(m => ({ ...m, [sid]: appendLiveAfterHistory(m[sid] ?? [], live) }))
     }

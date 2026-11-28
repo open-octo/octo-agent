@@ -107,6 +107,61 @@ describe('loadMobileHistory resync', () => {
     expect(historyPrefixLen(SID)).toBe(3)
   })
 
+  it.each(['older-first', 'newer-first'] as const)('discards the older of two overlapping resyncs (%s)', async (order) => {
+    await seedFullLoad()
+
+    // A network flap starts a second reconnect while the first resync is still
+    // in flight. Both requests carry the same cached cursor; the newer response
+    // may also include messages persisted after the older one was answered.
+    let releaseOlder!: (v: unknown) => void
+    let releaseNewer!: (v: unknown) => void
+    getSessionMessages
+      .mockReturnValueOnce(new Promise(r => (releaseOlder = r)))
+      .mockReturnValueOnce(new Promise(r => (releaseNewer = r)))
+    const older = loadMobileHistory(SID, true)
+    const newer = loadMobileHistory(SID, true)
+
+    const olderResponse = {
+      events: [
+        { type: 'history_user_message', content: 'second question', created_at: 3000, message_index: 2 },
+        { type: 'assistant_message', content: 'second answer', created_at: 4000, message_index: 3 },
+      ],
+      epoch: 0,
+      history_len: 4,
+      incremental: true,
+    }
+    const newerResponse = {
+      events: [
+        ...olderResponse.events,
+        { type: 'history_user_message', content: 'third question', created_at: 5000, message_index: 4 },
+        { type: 'assistant_message', content: 'third answer', created_at: 6000, message_index: 5 },
+      ],
+      epoch: 0,
+      history_len: 6,
+      incremental: true,
+    }
+    if (order === 'older-first') {
+      releaseOlder(olderResponse)
+      await older
+      releaseNewer(newerResponse)
+      await newer
+    } else {
+      releaseNewer(newerResponse)
+      await newer
+      releaseOlder(olderResponse)
+      await older
+    }
+
+    // Regardless of resolution order, only the newest load may write: the tail
+    // must neither duplicate nor move the persisted cursor backwards.
+    expect(get(chatMessages)[SID].map(m => m.content)).toEqual([
+      'first question', 'first answer', 'second question', 'second answer',
+      'third question', 'third answer',
+    ])
+    expect(historyPrefixLen(SID)).toBe(6)
+    expect(getHistoryPos(SID)).toEqual({ after: 6, epoch: 0 })
+  })
+
   it('falls back to a full replace when the server reports a moved epoch', async () => {
     await seedFullLoad()
     // While disconnected someone compacted the session: the server answers a
