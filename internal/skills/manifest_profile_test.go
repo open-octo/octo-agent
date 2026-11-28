@@ -12,8 +12,15 @@ import (
 // directory and returns a Registry that has them loaded. Required because
 // TestMain redirects defaultSkillsRoot to an empty temp dir; tests that need
 // the real defaults must opt in.
+//
+// The user root is isolated too: Discover reads ~/.octo/skills, so without
+// this a developer with skills installed gets them mixed into the counts and
+// `make test` goes red on a clean checkout. Same reason expert_skills_test.go
+// redirects HOME.
 func discoverWithDefaults(t *testing.T) *Registry {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
 	root := filepath.Join(t.TempDir(), "skills-default")
 	useDefaultRoot(t, root)
 	useExpertRoot(t, t.TempDir())

@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +28,7 @@ func swapEndpoint(t *testing.T, target *string, value string) {
 // known "zero-key" state, then restores them on cleanup.
 func clearSearchEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"BRAVE_SEARCH_API_KEY", "TAVILY_API_KEY", "SERPER_API_KEY"} {
+	for _, k := range []string{"DEEPSEEK_API_KEY", "BRAVE_SEARCH_API_KEY", "TAVILY_API_KEY", "SERPER_API_KEY"} {
 		t.Setenv(k, "")
 	}
 }
@@ -265,6 +266,184 @@ func TestWebSearch_AllBackendsFail(t *testing.T) {
 	}
 }
 
+func TestWebSearch_DeepSeekPreferred(t *testing.T) {
+	clearSearchEnv(t)
+	resetDDGCooldown()
+	t.Setenv("DEEPSEEK_API_KEY", "dk")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer dk" {
+			t.Errorf("DeepSeek auth header = %q, want 'Bearer dk'", got)
+		}
+		var req struct {
+			Query string `json:"query"`
+			Count int    `json:"count"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Errorf("request body isn't JSON: %s", body)
+		}
+		if req.Query != "go generics" || req.Count != 2 {
+			t.Errorf("request = %+v, want query 'go generics' count 2", req)
+		}
+		// Full documented response shape, unused fields included — proves the
+		// decoder tolerates rerank_score/site_name/date/authority rather than
+		// only the four fields the struct carries.
+		_, _ = w.Write([]byte(`{"results":[
+			{"rerank_score":2.4,"title":"D1","url":"https://d1","snippet":"short one","summary":"the long model-facing abstract","content":"","site_name":"Example","site_icon":"https://d1/favicon.ico","date":"2026-06-01T00:00:00+00:00","authority":3},
+			{"rerank_score":1.8,"title":"D2","url":"https://d2","snippet":"short two","summary":"","content":"","site_name":null,"site_icon":null,"date":null,"authority":-1}
+		]}`))
+	}))
+	defer srv.Close()
+	swapEndpoint(t, &deepseekEndpoint, srv.URL)
+
+	out, err := WebSearchTool{}.Execute(context.Background(), "web_search", map[string]any{
+		"query":       "go generics",
+		"max_results": 2,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var resp WebSearchResponse
+	if err := json.Unmarshal([]byte(out.Text), &resp); err != nil {
+		t.Fatalf("output isn't valid JSON: %v\n%s", err, out.Text)
+	}
+	if resp.Provider != "deepseek" {
+		t.Errorf("Provider = %q, want 'deepseek'", resp.Provider)
+	}
+	if len(resp.Results) != 2 || resp.Results[0].URL != "https://d1" {
+		t.Fatalf("results = %+v", resp.Results)
+	}
+	// summary is the model-facing field; snippet is only the fallback.
+	if resp.Results[0].Snippet != "the long model-facing abstract" {
+		t.Errorf("first snippet = %q, want the summary text", resp.Results[0].Snippet)
+	}
+	if resp.Results[1].Snippet != "short two" {
+		t.Errorf("empty summary should fall back to the snippet; got %q", resp.Results[1].Snippet)
+	}
+}
+
+// TestWebSearch_DeepSeekTruncatesLongQuery locks in the 128-rune query cap:
+// the API 400s past it, and an LLM-generated query can easily be longer.
+func TestWebSearch_DeepSeekTruncatesLongQuery(t *testing.T) {
+	clearSearchEnv(t)
+	resetDDGCooldown()
+	t.Setenv("DEEPSEEK_API_KEY", "dk")
+
+	long := strings.Repeat("搜", 200) // 3-byte runes: byte truncation would corrupt
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query string `json:"query"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		gotQuery = req.Query
+		_, _ = w.Write([]byte(`{"results":[{"title":"T","url":"https://t","summary":"s"}]}`))
+	}))
+	defer srv.Close()
+	swapEndpoint(t, &deepseekEndpoint, srv.URL)
+
+	if _, err := (WebSearchTool{}).Execute(context.Background(), "web_search", map[string]any{"query": long}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if n := len([]rune(gotQuery)); n != deepSeekQueryMaxRunes {
+		t.Errorf("forwarded query is %d runes, want %d", n, deepSeekQueryMaxRunes)
+	}
+	if !strings.HasPrefix(gotQuery, "搜") || strings.ContainsRune(gotQuery, '\uFFFD') {
+		t.Errorf("truncation split a multi-byte rune: %q", gotQuery)
+	}
+}
+
+// TestWebSearch_DeepSeekSummariesTruncated keeps 20 full-length summaries
+// from bursting the tool-output cap: only the head of each survives.
+func TestWebSearch_DeepSeekSummariesTruncated(t *testing.T) {
+	clearSearchEnv(t)
+	resetDDGCooldown()
+	t.Setenv("DEEPSEEK_API_KEY", "dk")
+
+	full := strings.Repeat("长", 800)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b strings.Builder
+		b.WriteString(`{"results":[`)
+		for i := 0; i < 20; i++ {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			fmt.Fprintf(&b, `{"title":"T%d","url":"https://e/%d","summary":%q}`, i, i, full)
+		}
+		b.WriteString(`]}`)
+		_, _ = w.Write([]byte(b.String()))
+	}))
+	defer srv.Close()
+	swapEndpoint(t, &deepseekEndpoint, srv.URL)
+
+	out, err := WebSearchTool{}.Execute(context.Background(), "web_search", map[string]any{
+		"query": "x", "max_results": 20,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var resp WebSearchResponse
+	if err := json.Unmarshal([]byte(out.Text), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Results) != 20 {
+		t.Fatalf("want 20 results, got %d", len(resp.Results))
+	}
+	for i, r := range resp.Results {
+		if n := len([]rune(r.Snippet)); n > deepSeekSummaryMaxRunes+1 { // +1 for the ellipsis
+			t.Errorf("result %d snippet is %d runes, want ≤ %d", i, n, deepSeekSummaryMaxRunes)
+		}
+	}
+}
+
+// TestWebSearch_DeepSeekFailureFallsThrough proves a bad DeepSeek key or
+// quota error degrades to the next backend instead of failing the search.
+func TestWebSearch_DeepSeekFailureFallsThrough(t *testing.T) {
+	clearSearchEnv(t)
+	resetDDGCooldown()
+	t.Setenv("DEEPSEEK_API_KEY", "bad")
+	t.Setenv("BRAVE_SEARCH_API_KEY", "bk")
+
+	dsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"insufficient balance"}}`, http.StatusPaymentRequired)
+	}))
+	defer dsSrv.Close()
+	swapEndpoint(t, &deepseekEndpoint, dsSrv.URL)
+
+	braveSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"web":{"results":[{"title":"B1","url":"https://b1","description":"d"}]}}`))
+	}))
+	defer braveSrv.Close()
+	swapEndpoint(t, &braveEndpoint, braveSrv.URL)
+
+	out, _ := WebSearchTool{}.Execute(context.Background(), "web_search", map[string]any{"query": "x"})
+	var resp WebSearchResponse
+	_ = json.Unmarshal([]byte(out.Text), &resp)
+	if resp.Provider != "brave" {
+		t.Errorf("Provider = %q, want 'brave' after DeepSeek 402", resp.Provider)
+	}
+	if len(resp.Results) != 1 || resp.Results[0].URL != "https://b1" {
+		t.Errorf("results = %+v", resp.Results)
+	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"abc", "abc"},
+		{"", ""},
+		{"abcd", "abc…"},
+		{"简体中文", "简体中…"},
+	}
+	for _, c := range cases {
+		n := 3
+		if got := truncateRunes(c.in, n); got != c.want {
+			t.Errorf("truncateRunes(%q, %d) = %q, want %q", c.in, n, got, c.want)
+		}
+	}
+}
+
 func TestWebSearch_RequiresQuery(t *testing.T) {
 	_, err := WebSearchTool{}.Execute(context.Background(), "web_search", map[string]any{})
 	if err == nil {
@@ -396,11 +575,17 @@ func TestWebSearchKeyedBackend_ReportsPriority(t *testing.T) {
 	if got := WebSearchKeyedBackend(); got != "serper" {
 		t.Errorf("serper only: got %q, want \"serper\"", got)
 	}
-	// Brave outranks both — same order Execute walks the backends in.
+	// Brave outranks Tavily and Serper — same order Execute walks the backends in.
 	t.Setenv("TAVILY_API_KEY", "tk")
 	t.Setenv("BRAVE_SEARCH_API_KEY", "bk")
 	if got := WebSearchKeyedBackend(); got != "brave" {
-		t.Errorf("all three set: got %q, want \"brave\"", got)
+		t.Errorf("three set: got %q, want \"brave\"", got)
+	}
+	// DeepSeek sits at the head of the cascade: cheapest per search and the
+	// only backend reliably reachable from mainland China.
+	t.Setenv("DEEPSEEK_API_KEY", "dk")
+	if got := WebSearchKeyedBackend(); got != "deepseek" {
+		t.Errorf("all four set: got %q, want \"deepseek\"", got)
 	}
 }
 
@@ -412,13 +597,16 @@ func TestWebSearchBackendMetadata(t *testing.T) {
 			t.Errorf("%s should be a scrape backend", name)
 		}
 	}
-	for _, name := range []string{"brave", "tavily", "serper", "", "startpage"} {
+	for _, name := range []string{"deepseek", "brave", "tavily", "serper", "", "startpage"} {
 		if WebSearchIsScrapedBackend(name) {
 			t.Errorf("%s should not be a scrape backend", name)
 		}
 	}
 	if got := WebSearchKeyEnvVar("tavily"); got != "TAVILY_API_KEY" {
 		t.Errorf("WebSearchKeyEnvVar(tavily) = %q", got)
+	}
+	if got := WebSearchKeyEnvVar("deepseek"); got != "DEEPSEEK_API_KEY" {
+		t.Errorf("WebSearchKeyEnvVar(deepseek) = %q", got)
 	}
 	// A scrape backend has no key to name — callers must not print an empty var.
 	if got := WebSearchKeyEnvVar("duckduckgo"); got != "" {
