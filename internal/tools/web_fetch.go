@@ -139,6 +139,9 @@ func (WebFetchTool) Execute(ctx context.Context, _ string, input map[string]any)
 		// A failed direct GET is the common anti-bot/hotlink wall. Retry it
 		// through DeepSeek's Fetch API when a key is set and the URL is fit to
 		// hand to a third party; see fetchViaDeepSeek for why that guard exists.
+		// Worst case this path costs ~65s (direct 30s + guard DNS 5s + fallback
+		// 30s) while still holding the web slot — acceptable for an agent tool,
+		// but it is why the slot is taken before the direct attempt.
 		if fb, fbErr, attempted := fetchViaDeepSeek(ctx, raw, clean, u, err); attempted {
 			if fbErr == nil {
 				fb.UI = webFetchUI(raw, fb.Text)
@@ -194,12 +197,26 @@ func publicFetchTarget(ctx context.Context, u *url.URL) bool {
 
 // publicFetchIP is publicFetchTarget's per-address rule. Unspecified (0.0.0.0)
 // counts as non-public on purpose: a URL aiming at it is a scanning attempt.
+// net.IP.IsPrivate covers only the RFC 1918 ranges, so CGNAT (RFC 6598) and
+// the 240/4 reserved block are refused explicitly — neither is routable on the
+// public internet, so the service could not reach one either.
 func publicFetchIP(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
-	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast())
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() {
+		return false
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		switch {
+		case ip4[0] >= 240: // 240.0.0.0/4 reserved, incl. the broadcast address
+			return false
+		case ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127: // 100.64.0.0/10 CGNAT
+			return false
+		}
+	}
+	return true
 }
 
 // fetchViaDeepSeek retries a failed direct fetch through
@@ -217,6 +234,13 @@ func fetchViaDeepSeek(ctx context.Context, rawURL string, clean bool, u *url.URL
 		return agent.ToolResult{}, nil, false
 	}
 	if os.Getenv("DEEPSEEK_API_KEY") == "" {
+		return agent.ToolResult{}, nil, false
+	}
+	// Credentials in the URL would leave the machine inside the request body —
+	// the guard inspects u.Hostname(), which has them stripped, so it cannot
+	// catch this. The API rejects userinfo anyway, so the only effect of
+	// forwarding is the leak.
+	if u.User != nil {
 		return agent.ToolResult{}, nil, false
 	}
 	if !thirdPartyFetchAllowed(ctx, u) {
@@ -246,7 +270,11 @@ func fetchViaDeepSeek(ctx context.Context, rawURL string, clean bool, u *url.URL
 		Title   string `json:"title"`
 		Content string `json:"content"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, WebFetchMaxBytes)).Decode(&data); err != nil {
+	// The envelope gets headroom over WebFetchMaxBytes: JSON escaping inflates
+	// Markdown, so capping the read at exactly the content limit would fail the
+	// decode on a page that is merely near it, and the content cap below would
+	// never run.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2*WebFetchMaxBytes)).Decode(&data); err != nil {
 		return agent.ToolResult{}, fmt.Errorf("deepseek fetch: decode: %w", err), true
 	}
 	if strings.TrimSpace(data.Content) == "" {

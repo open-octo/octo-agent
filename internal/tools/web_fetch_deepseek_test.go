@@ -185,6 +185,92 @@ func TestWebFetch_FallbackEmptyContentIsAnError(t *testing.T) {
 	}
 }
 
+// TestWebFetch_NoFallbackWithUserinfo: credentials in the URL must not be
+// forwarded to the third-party service — the host guard cannot see them, so
+// this is a separate gate.
+func TestWebFetch_NoFallbackWithUserinfo(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "dk")
+	stubPublicTarget(t)
+
+	hits := 0
+	ds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer ds.Close()
+	swapEndpoint(t, &deepseekFetchEndpoint, ds.URL)
+
+	// The host is unroutable, so the direct GET fails and the fallback is reached.
+	_, err := (WebFetchTool{}).Execute(context.Background(), "web_fetch", map[string]any{
+		"url": "http://user:secret@192.0.2.1/page",
+	})
+	if err == nil {
+		t.Fatal("want the direct error, got success")
+	}
+	if hits != 0 {
+		t.Errorf("a URL carrying credentials must not be sent to DeepSeek; got %d hits", hits)
+	}
+	if strings.Contains(err.Error(), "secret") {
+		t.Errorf("error text must not echo the credential: %v", err)
+	}
+}
+
+// TestWebFetch_FallbackSpillKeepsProvenance: a large extraction spills to a
+// temp file, and the provenance note has to travel with it rather than living
+// only in an inline body.
+func TestWebFetch_FallbackSpillKeepsProvenance(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "dk")
+	stubPublicTarget(t)
+	target := forbiddenTarget(t)
+
+	big := strings.Repeat("# section\n\nbody line of text\n\n", 4000) // > 64 KB
+	payload, err := json.Marshal(map[string]string{"title": "Big", "content": big})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer ds.Close()
+	swapEndpoint(t, &deepseekFetchEndpoint, ds.URL)
+
+	out, err := (WebFetchTool{}).Execute(context.Background(), "web_fetch", map[string]any{"url": target.URL})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.Text, "Saved to:") {
+		t.Fatalf("expected a spilled preview, got:\n%s", out.Text)
+	}
+	if !strings.Contains(out.Text, "DeepSeek Fetch API") {
+		t.Errorf("spilled preview should carry the provenance note; got:\n%s", out.Text)
+	}
+}
+
+// TestWebFetch_FallbackRequestShape pins the wire shape the contract requires.
+func TestWebFetch_FallbackRequestShape(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "dk")
+	stubPublicTarget(t)
+	target := forbiddenTarget(t)
+
+	var gotMethod, gotCT string
+	ds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotCT = r.Header.Get("Content-Type")
+		_, _ = w.Write([]byte(`{"title":"t","content":"c"}`))
+	}))
+	defer ds.Close()
+	swapEndpoint(t, &deepseekFetchEndpoint, ds.URL)
+
+	if _, err := (WebFetchTool{}).Execute(context.Background(), "web_fetch", map[string]any{"url": target.URL}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotCT != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotCT)
+	}
+}
+
 // TestPublicFetchTarget covers the guard's decisions without any network use
 // for the literal cases.
 func TestPublicFetchTarget(t *testing.T) {
@@ -197,6 +283,9 @@ func TestPublicFetchTarget(t *testing.T) {
 		{"10.1.2.3", false},
 		{"192.168.1.10", false},
 		{"169.254.169.254", false}, // cloud metadata
+		{"100.64.1.1", false},      // CGNAT, RFC 6598
+		{"240.1.1.1", false},       // reserved, RFC 1112
+		{"255.255.255.255", false}, // broadcast
 		{"8.8.8.8", true},
 		{"", false},
 	}
