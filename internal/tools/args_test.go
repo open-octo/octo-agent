@@ -48,6 +48,7 @@ func TestArgReaders_TolerateStringEncodedScalars(t *testing.T) {
 		{"int64", map[string]any{"n": int64(7)}, 7, true},
 		{"quoted", map[string]any{"n": "7"}, 7, true},
 		{"quoted with spaces", map[string]any{"n": " 7 "}, 7, true},
+		{"quoted negative", map[string]any{"n": "-5"}, -5, true},
 		{"absent", map[string]any{}, 0, false},
 		{"not a number", map[string]any{"n": "seven"}, 0, false},
 		{"null", map[string]any{"n": nil}, 0, false},
@@ -75,6 +76,8 @@ func TestArgReaders_TolerateStringEncodedScalars(t *testing.T) {
 		{map[string]any{"b": "false"}, false},
 		{map[string]any{"b": float64(1)}, true},
 		{map[string]any{"b": float64(0)}, false},
+		{map[string]any{"b": int64(2)}, true},
+		{map[string]any{"b": "yes"}, true},
 		{map[string]any{}, false},
 	} {
 		if got := boolArg(tc.in, "b"); got != tc.want {

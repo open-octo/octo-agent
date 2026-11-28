@@ -411,8 +411,10 @@ func subAgentResultUI(agentID string) map[string]any {
 }
 
 // boolArg pulls a boolean argument, defaulting to false. It accepts the shapes
-// a model actually emits: a real bool, a number (0/1), or the strings "true" /
-// "false".
+// a model actually emits: a real bool, any non-zero number (0 means false), or
+// the strings "true" / "yes" / "1". Mirroring argInt's tolerance matters more
+// than strictness here — a stringified flag would otherwise silently read as
+// false and the tool would quietly do the wrong thing.
 func boolArg(input map[string]any, key string) bool {
 	switch v := input[key].(type) {
 	case bool:
@@ -420,6 +422,8 @@ func boolArg(input map[string]any, key string) bool {
 	case float64:
 		return v != 0
 	case int:
+		return v != 0
+	case int64:
 		return v != 0
 	case string:
 		switch strings.ToLower(strings.TrimSpace(v)) {

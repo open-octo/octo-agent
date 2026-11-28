@@ -339,6 +339,11 @@ func resolvePathIn(base, path string) (string, error) {
 // ("5" — common from models that stringify scalars). ok is false when the key
 // is absent or carries something that isn't a number at all, which lets the
 // caller distinguish "you forgot task_id" from "you sent task_id as text".
+//
+// A quoted fraction ("5.5") is rejected while a bare 5.5 truncates to 5: the
+// quoted form has to parse as an integer, the atomic one is just cast. Models
+// rarely stringify a fraction, so this asymmetry buys nothing worth a special
+// case — but don't be surprised by it.
 func argInt(input map[string]any, key string) (int, bool) {
 	switch v := input[key].(type) {
 	case int:
