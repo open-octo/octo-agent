@@ -3696,13 +3696,21 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
      translateY(4px) → none, which would override translateX(-50%) for the
      animation's duration and snap the button sideways when it ends. */
   animation: jump-bottom-in 0.15s ease;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.15s, color 0.15s, opacity 0.15s;
 }
 @keyframes jump-bottom-in {
   from { opacity: 0; transform: translateX(-50%) translateY(4px); }
   to { opacity: 1; transform: translateX(-50%); }
 }
 .jump-bottom:hover { border-color: var(--blue-2); color: var(--blue-6); }
+/* A rail node's hover preview extends up to 260px left of the rail; on narrow
+   panes, hovering a node near the bottom would otherwise draw the dark tooltip
+   right over this button. The cursor is on the rail in that moment, so fade
+   the button out instead of letting the two overlap. */
+.messages-wrap:has(.msg-rail-node:hover) .jump-bottom,
+.messages-wrap:has(.msg-rail-node:focus-visible) .jump-bottom {
+  opacity: 0; pointer-events: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .jump-bottom { animation: none; transition: none; }
 }
