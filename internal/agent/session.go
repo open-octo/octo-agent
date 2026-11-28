@@ -105,6 +105,16 @@ type Session struct {
 	// that never completed a turn with a real token count. Updated once per turn
 	// via SetLastContextTokens.
 	LastContextTokens int `json:"last_context_tokens,omitempty"`
+	// HistoryEpoch identifies the transcript's version for the web client's
+	// reconnect resync (#2745): the client caches it with its history cursor
+	// and asks the messages endpoint for only the tail persisted since. Save
+	// bumps it on every destructive rewrite of the persisted messages — a
+	// shrink (edit / retry rollback / /clear) or a same-length content rewrite
+	// reported by SyncFrom (compaction, repair, popLast) — so a stale cursor
+	// is detected by mismatch and falls back to a full refetch. Append-only
+	// turns never touch it. 0 for sessions predating this field; their first
+	// rewrite bumps it to 1, which is still a mismatch against any cached 0.
+	HistoryEpoch int `json:"history_epoch,omitempty"`
 	// ContentUpdatedAt is when the transcript itself last changed (a message
 	// appended, truncated, or rewritten) — deliberately distinct from the
 	// session file's OS mtime, which also moves on every binding/lease
@@ -617,6 +627,7 @@ type sessionRecord struct {
 	HookStarted           bool      `json:"hook_started,omitempty"`
 	BranchedFrom          string    `json:"branched_from,omitempty"`
 	LastContextTokens     int       `json:"last_context_tokens,omitempty"`
+	HistoryEpoch          int       `json:"history_epoch,omitempty"`
 	ContentUpdatedAt      time.Time `json:"content_updated_at,omitempty"`
 	Message               *Message  `json:"message,omitempty"`
 	Goal                  *Goal     `json:"goal,omitempty"`
@@ -634,7 +645,7 @@ func (s *Session) metaRecord() sessionRecord {
 		goal = &g
 	}
 	s.mu.Unlock()
-	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, ComposedForCWD: s.ComposedForCWD, ComposedForSourceDirs: s.ComposedForSourceDirs, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, ContentUpdatedAt: s.ContentUpdatedAt, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
+	return sessionRecord{Type: "meta", ID: s.ID, CreatedAt: s.CreatedAt, Model: s.Model, System: s.System, ComposedSystem: s.ComposedSystem, ComposedLeanSystem: s.ComposedLeanSystem, ComposedForModel: s.ComposedForModel, ComposedForCWD: s.ComposedForCWD, ComposedForSourceDirs: s.ComposedForSourceDirs, Title: s.Title, Source: s.Source, ModelConfig: s.ModelConfig, AgentID: s.AgentID, WorkingDir: s.WorkingDir, PermissionMode: s.PermissionMode, LastContextTokens: s.LastContextTokens, HistoryEpoch: s.HistoryEpoch, ContentUpdatedAt: s.ContentUpdatedAt, BoundEntry: s.BoundEntry, BoundAt: s.BoundAt, HookStarted: s.HookStarted, BranchedFrom: s.BranchedFrom, Goal: goal}
 }
 
 // MarkHookStarted records that SessionStart has fired for this session, so a
@@ -675,6 +686,16 @@ func (s *Session) Save() error {
 	// advances ContentUpdatedAt; see its doc comment.
 	contentChanged := len(s.Messages) != s.persisted || s.rewriteIsContent
 	if s.forceRewrite || s.persisted == 0 || len(s.Messages) < s.persisted {
+		// A destructive transcript rewrite — the in-memory list shrank below
+		// what is on disk (edit / retry rollback / /clear), or SyncFrom reported
+		// a same-length content rewrite (compaction, repair, popLast). Move the
+		// history epoch so a web client resyncing after a reconnect detects
+		// that its incremental cursor no longer names this history and
+		// refetches in full (#2745). Bookkeeping rewrites (Bind, MarkHookStarted,
+		// dropped-tail repair) change no message and must not bump it.
+		if len(s.Messages) < s.persisted || s.rewriteIsContent {
+			s.HistoryEpoch++
+		}
 		if contentChanged {
 			s.stampContentUpdated()
 		}
@@ -1463,6 +1484,7 @@ func LoadSession(id string) (*Session, error) {
 			s.WorkingDir = rec.WorkingDir
 			s.PermissionMode = rec.PermissionMode
 			s.LastContextTokens = rec.LastContextTokens // a rewritten file carries it in its meta header
+			s.HistoryEpoch = rec.HistoryEpoch           // a rewritten file carries it in its meta header
 			s.ContentUpdatedAt = rec.ContentUpdatedAt   // a rewritten file carries it in its meta header
 			s.BoundEntry = rec.BoundEntry
 			s.BoundAt = rec.BoundAt

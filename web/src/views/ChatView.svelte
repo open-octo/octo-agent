@@ -42,6 +42,10 @@
     artifacts,
     addChatMsg,
     clearMsgs,
+    historyPrefixLen,
+    setHistoryPrefixLen,
+    getHistoryPos,
+    setHistoryPos,
     appendToLastAssistant,
     addToolCallToGroup,
     commitThinking,
@@ -425,11 +429,22 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   }
 
   // loadHistory fetches and renders a session's persisted transcript. Used on
-  // session switch, on a server `history_reload` (after /clear or /compact
-  // rewrote history out of band) and on `history_rollback` (edit / retry
-  // stripped the tail). Returns a promise that resolves once the
+  // session switch (full), on a server `history_reload` (reconnect resync, or
+  // /clear & /compact rewriting history out of band) and on `history_rollback`
+  // (edit / retry stripped the tail). Returns a promise that resolves once the
   // fetch settles (success or failure) — the mount effect below awaits it
   // before subscribing over WS; see the comment there for why.
+  //
+  // resync marks the reconnect path (#2745): the request carries the cached
+  // persisted-history cursor ({after, epoch} from the previous load) and the
+  // server answers with just the tail persisted while we were disconnected —
+  // unless the epoch moved (edit / rollback / compaction / clear on another
+  // client), which falls back to a full response. The message list's history
+  // render is a stable PREFIX (live WS events only append at the tail), so in
+  // both modes the previously rendered prefix stays on screen during the fetch:
+  // a reconnect no longer blanks the transcript the user is reading. In the
+  // incremental mode the prefix is kept and only the tail events append; in the
+  // full mode the list is cleared and re-rendered at resolve time.
   //
   // isStale is checked after the fetch resolves: the user may have switched
   // sessions while it was in flight, and a stale response must not write into
@@ -441,7 +456,7 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
   // older response landing after the second clear would render a transcript
   // the newer response then appends again (#2570).
   const historyLoadGen = new Map<string, number>()
-  function loadHistory(sid: string, isCancelled: () => boolean): Promise<void> {
+  function loadHistory(sid: string, isCancelled: () => boolean, resync = false): Promise<void> {
     const gen = (historyLoadGen.get(sid) ?? 0) + 1
     historyLoadGen.set(sid, gen)
     const isStale = () => isCancelled() || historyLoadGen.get(sid) !== gen
@@ -456,18 +471,41 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     api.getAgentRuns(sid)
       .then((resp: any) => { if (!isStale()) hydrateAgentRuns(sid, resp) })
       .catch(() => {})
-    return api.getSessionMessages(sid).then((resp: any) => {
+    // Drop the stale live tail up front, keeping the rendered history PREFIX
+    // on screen while the fetch runs (#2745). The tail is rebuildable — turns
+    // that completed while connected re-render from the fetched history, and a
+    // turn still running is re-delivered from turn start by the subscribe
+    // replay — so keeping it would duplicate both against what arrives next.
+    chatMessages.update(m => {
+      const msgs = m[sid] ?? []
+      return { ...m, [sid]: msgs.slice(0, Math.min(historyPrefixLen(sid), msgs.length)) }
+    })
+    return api.getSessionMessages(sid, resync ? getHistoryPos(sid) ?? undefined : undefined).then((resp: any) => {
       if (isStale()) return
       const events: any[] = resp?.events ?? []
       // Server-resolved, so it's correct even before $sessions has loaded —
       // see the comment on the 'thinking' branch in handleHistoryEvent.
       const historyShowReasoning = resp?.show_reasoning ?? true
+      const incremental = resp?.incremental === true
       // Live events can land while the fetch is in flight — after a rollback
-      // the rerun is already streaming. Set them aside so history renders
-      // first (and its tool calls group onto history bubbles), then put them
-      // back behind it, minus the echo the fetch already returned.
-      const live = get(chatMessages)[sid] ?? []
-      clearMsgs(sid)
+      // the rerun is already streaming, and on reconnect the subscribe replay
+      // of a running turn arrives alongside this fetch. They sit in the tail
+      // behind the history prefix; set them aside so history renders first,
+      // then put them back behind it, minus the echo the fetch returned.
+      const msgs = get(chatMessages)[sid] ?? []
+      const prefixLen = Math.min(historyPrefixLen(sid), msgs.length)
+      const live = msgs.slice(prefixLen)
+      if (incremental) {
+        // Keep the previously rendered prefix untouched and append only the
+        // new persisted tail — a reconnect resync must neither blank nor
+        // re-render a long transcript the user is already reading (#2745).
+        chatMessages.update(m => ({ ...m, [sid]: (m[sid] ?? []).slice(0, prefixLen) }))
+      } else {
+        clearMsgs(sid)
+        // History re-observes every artifact in transcript order; start from a
+        // clean panel state so a rewritten transcript doesn't keep ghost ones.
+        resetArtifacts(sid)
+      }
       // Collect the tool_ids that came from history so we only close those,
       // leaving any concurrently-replayed live-turn tools untouched.
       const historyToolIds = new Set<string>()
@@ -477,6 +515,18 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
       }
       // Finish only the history tools (not live-turn tools from WS replay).
       finishToolsById(sid, historyToolIds)
+      // The freshly rendered history becomes the prefix the next swap counts
+      // the live tail from. Read the length back from the store: some events
+      // render nothing (empty assistant rounds), so it is not events.length.
+      setHistoryPrefixLen(sid, (get(chatMessages)[sid] ?? []).length)
+      // Cache the cursor only after every history event rendered successfully:
+      // advancing it earlier would claim messages were consumed even if a
+      // render threw, leaving a silent hole until the next full reload. An
+      // older server omits both fields, so the next resync retries incrementally
+      // only once real cursor values are cached here.
+      if (typeof resp?.history_len === 'number' && typeof resp?.epoch === 'number') {
+        setHistoryPos(sid, { after: resp.history_len, epoch: resp.epoch })
+      }
       if (live.length) {
         chatMessages.update(m => ({ ...m, [sid]: appendLiveAfterHistory(m[sid] ?? [], live) }))
       }
@@ -620,9 +670,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     cleanups.push(ws.on('history_reload', (ev) => {
       if ((ev as any).session_id !== sid) return
-      clearMsgs(sid)
-      resetArtifacts(sid)
-      loadHistory(sid, () => cancelled)
+      // No pre-clear: the transcript the user is reading stays on screen until
+      // the resync resolves, and an incremental (tail-only) response never
+      // redraws it at all (#2745).
+      loadHistory(sid, () => cancelled, true)
     }))
 
     // A mid-turn compaction moved every persisted index on disk. Shift the
@@ -636,11 +687,10 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
 
     // The transcript tail was stripped server-side (retry / rollback): re-render
     // from the persisted history before any new events stream in. Same effect as
-    // history_reload — different trigger.
+    // history_reload — different trigger. Always a full fetch: a rollback moved
+    // the history epoch, so the incremental cursor is invalid by definition.
     cleanups.push(ws.on('history_rollback', (ev) => {
       if ((ev as any).session_id !== sid) return
-      clearMsgs(sid)
-      resetArtifacts(sid)
       loadHistory(sid, () => cancelled)
     }))
 

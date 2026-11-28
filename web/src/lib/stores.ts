@@ -371,6 +371,42 @@ export const editDraft = writable('')
 
 // Per-session chat state (keyed by sessionId)
 export const chatMessages = writable<Record<string, any[]>>({})
+
+// ── history prefix marker (reconnect resync, #2745) ─────────────────────────
+// chatMessages[sid] is always [rendered persisted history][live WS events]:
+// live events only append at the tail, so the history render is a stable
+// PREFIX. The counter lets the history_reload/rollback path keep the rendered
+// prefix on screen while the refetch is in flight instead of blanking the
+// whole transcript: the stale live tail is dropped up front (it is rebuilt by
+// the fetched history and the subscribe replay), and live events landing
+// during the fetch are sliced off at the counter and re-appended afterwards.
+const historyPrefix = new Map<string, number>()
+
+export function historyPrefixLen(sessionId: string): number {
+  return historyPrefix.get(sessionId) ?? 0
+}
+
+export function setHistoryPrefixLen(sessionId: string, n: number): void {
+  historyPrefix.set(sessionId, n)
+}
+
+// historyPos is the persisted-history cursor per session for the incremental
+// reconnect resync: `after` counts persisted messages already consumed (an
+// exclusive count, same semantics as message_index+1); `epoch` identifies the
+// history version — the server bumps it on every destructive rewrite
+// (edit/rollback/compaction/clear), and a mismatch forces a full refetch.
+// In-memory only: a page reload refetches everything anyway, so there is no
+// cache-consistency burden across page loads.
+export interface HistoryPos { after: number; epoch: number }
+const historyPos = new Map<string, HistoryPos>()
+
+export function getHistoryPos(sessionId: string): HistoryPos | null {
+  return historyPos.get(sessionId) ?? null
+}
+
+export function setHistoryPos(sessionId: string, pos: HistoryPos): void {
+  historyPos.set(sessionId, pos)
+}
 export const chatStreaming = writable<Record<string, boolean>>({})
 // Wall-clock time (ms) of the last text_delta per session. The reply caret is
 // gated on this being recent: the assistant message stays `streaming` for the
@@ -684,6 +720,10 @@ export function appendToLastAssistant(sessionId: string, content: string, pendin
 
 export function clearMsgs(sessionId: string) {
   chatMessages.update(m => ({ ...m, [sessionId]: [] }))
+  // A cleared session has no rendered history prefix left — reset the marker
+  // or a later swap would treat freshly appended live bubbles as history and
+  // drop them when its slice lands beyond them.
+  setHistoryPrefixLen(sessionId, 0)
 }
 
 // Finalize any streaming assistant message in a list — shared by every call

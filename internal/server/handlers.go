@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -615,12 +616,34 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 	}
 	s.liveStateMu.RUnlock()
 
+	// Incremental reconnect resync (#2745): the web client passes the cursor
+	// from its previous load (after = persisted messages consumed, epoch = the
+	// history version it rendered). Serve only the tail after the cursor when
+	// the epoch still matches; a moved epoch (edit / rollback / compaction /
+	// /clear while the tab was disconnected) or a cursor beyond the served
+	// history falls back to a full response. Anything malformed is a full
+	// response too, so old clients are unaffected.
+	after := 0
+	incremental := false
+	q := r.URL.Query()
+	if q.Has("after") && q.Has("epoch") {
+		if a, err := strconv.Atoi(q.Get("after")); err == nil && a >= 0 && a <= len(msgs) {
+			if e, err := strconv.Atoi(q.Get("epoch")); err == nil && e == sess.HistoryEpoch {
+				after = a
+				incremental = true
+			}
+		}
+	}
+
 	// The Web UI expects an event stream that mirrors the live WS traffic.
 	// We translate the persisted message list into user/assistant events and
 	// reconstruct tool_call / tool_result pairs from tool_use / tool_result
-	// blocks so the history replay is visually complete.
+	// blocks so the history replay is visually complete. idx stays the absolute
+	// persisted index across the incremental tail slice — message_index and the
+	// createdAt fallback address the full history, not this response's tail.
 	events := make([]map[string]any, 0, len(msgs)*2)
-	for i, m := range msgs {
+	for i, m := range msgs[after:] {
+		idx := i + after
 		switch m.Role {
 		case agent.RoleUser:
 			// Emit tool_result events for any tool_result blocks before the
@@ -664,7 +687,7 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 			// twice when a history fetch races the live event.
 			createdAt := m.CreatedAt.UnixMilli()
 			if m.CreatedAt.IsZero() {
-				createdAt = int64(i + 1)
+				createdAt = int64(idx + 1)
 			}
 			// A multipart user message (image attachments) carries its text
 			// in blocks rather than Content, and its images as blocks whose
@@ -705,7 +728,7 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 					"type":          "history_user_message",
 					"content":       text,
 					"created_at":    createdAt,
-					"message_index": i, // position in the persisted Messages array — may differ from the rendered index (tool_result-only messages are skipped)
+					"message_index": idx, // position in the persisted Messages array — may differ from the rendered index (tool_result-only messages are skipped)
 				}
 				if len(images) > 0 {
 					ev["images"] = images
@@ -790,7 +813,7 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 					"type":          "assistant_message",
 					"content":       m.Content,
 					"thinking":      thinking,
-					"message_index": i,
+					"message_index": idx,
 				}
 				// Without this the Web UI stamps the replayed bubble with the
 				// reload time, so an answer from this morning reads as "now"
@@ -808,6 +831,13 @@ func (s *Server) handleGetSessionMessages(w http.ResponseWriter, r *http.Request
 		"has_more":       false,
 		"events":         events,
 		"show_reasoning": effShowReasoning,
+		// Reconnect-resync cursor (#2745): the client caches {history_len,
+		// epoch} and asks for the tail after it next time. history_len counts
+		// the served prefix (watermark-capped), so the running turn's own
+		// messages never enter the cursor — they arrive over WS instead.
+		"incremental": incremental,
+		"epoch":       sess.HistoryEpoch,
+		"history_len": len(msgs),
 	})
 }
 
