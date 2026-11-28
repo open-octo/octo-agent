@@ -33,14 +33,15 @@ const WebSearchHardMax = 20
 // Backend endpoints. These are vars (not consts) so tests can redirect
 // each backend at an httptest server. Production keeps the defaults.
 var (
-	braveEndpoint  = "https://api.search.brave.com/res/v1/web/search"
-	tavilyEndpoint = "https://api.tavily.com/search"
-	serperEndpoint = "https://google.serper.dev/search"
-	ddgEndpoint    = "https://html.duckduckgo.com/html/"
-	bingEndpoint   = "https://cn.bing.com/search"
+	deepseekEndpoint = "https://api.deepseek.com/v1/tools/search"
+	braveEndpoint    = "https://api.search.brave.com/res/v1/web/search"
+	tavilyEndpoint   = "https://api.tavily.com/search"
+	serperEndpoint   = "https://google.serper.dev/search"
+	ddgEndpoint      = "https://html.duckduckgo.com/html/"
+	bingEndpoint     = "https://cn.bing.com/search"
 )
 
-// WebSearchResult is a single normalised search hit. All five backends
+// WebSearchResult is a single normalised search hit. All six backends
 // flatten their wire-format response into this shape so the LLM sees the
 // same contract regardless of which backend produced the result.
 type WebSearchResult struct {
@@ -75,6 +76,7 @@ var keyedSearchBackends = []struct {
 	env  string
 	run  func(context.Context, string, int) ([]WebSearchResult, error)
 }{
+	{"deepseek", "DEEPSEEK_API_KEY", searchDeepSeek},
 	{"brave", "BRAVE_SEARCH_API_KEY", searchBrave},
 	{"tavily", "TAVILY_API_KEY", searchTavily},
 	{"serper", "SERPER_API_KEY", searchSerper},
@@ -137,11 +139,12 @@ func WebSearchKeyEnvVar(backend string) string {
 }
 
 // WebSearchTool searches the web. Backend priority (descending):
-//  1. Brave Search API (env BRAVE_SEARCH_API_KEY)
-//  2. Tavily API       (env TAVILY_API_KEY)
-//  3. Serper.dev       (env SERPER_API_KEY)
-//  4. DuckDuckGo HTML  (zero key, default)
-//  5. Bing HTML        (zero key, fallback when DDG returns nothing)
+//  1. DeepSeek Search API (env DEEPSEEK_API_KEY)
+//  2. Brave Search API    (env BRAVE_SEARCH_API_KEY)
+//  3. Tavily API          (env TAVILY_API_KEY)
+//  4. Serper.dev          (env SERPER_API_KEY)
+//  5. DuckDuckGo HTML     (zero key, default)
+//  6. Bing HTML           (zero key, fallback when DDG returns nothing)
 //
 // The tool never panics — every backend failure becomes an Error field in
 // the returned response, and the next backend is tried.
@@ -152,9 +155,10 @@ func (WebSearchTool) Definition() agent.ToolDefinition {
 		Name: "web_search",
 		Description: "Search the web. Returns title/url/snippet for each hit. Works " +
 			"with no API key (uses DuckDuckGo + Bing HTML scraping); set " +
-			"BRAVE_SEARCH_API_KEY / TAVILY_API_KEY / SERPER_API_KEY to opt into a " +
-			"paid backend with higher quality and stricter ToS. The Provider field " +
-			"in the response tells you which backend actually produced the results.",
+			"DEEPSEEK_API_KEY / BRAVE_SEARCH_API_KEY / TAVILY_API_KEY / SERPER_API_KEY " +
+			"to opt into a paid backend with higher quality and stricter ToS. The " +
+			"Provider field in the response tells you which backend actually " +
+			"produced the results.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -274,6 +278,75 @@ func (WebSearchTool) Execute(ctx context.Context, _ string, input map[string]any
 }
 
 // ───────────────────── paid API backends ─────────────────────
+
+// deepSeekQueryMaxRunes is the API's hard limit on query length (128 Unicode
+// characters — over it the request is a 400). LLM-generated queries can
+// drift longer, so the backend truncates by rune instead of failing the
+// search. Note the response still echoes the caller's full query, so an
+// overlong one searches on its head only.
+const deepSeekQueryMaxRunes = 128
+
+// deepSeekSummaryMaxRunes caps the per-result summary handed to the LLM.
+// The API's `summary` field is the model-oriented abstract (600–800 chars);
+// at the 20-result maximum that is ~16 KB of prompt context per search, all
+// of it appended to the conversation for the rest of the session, so we keep
+// the head of each and cut. (EventToolOutputCap bounds only the observer
+// events the UI renders, not what the model reads — the context budget is
+// the real constraint here.)
+const deepSeekSummaryMaxRunes = 300
+
+// searchDeepSeek: https://api.deepseek.com/v1/tools/search
+// DeepSeek's in-house search index, billed per successful request
+// ($0.75/1000; empty results and errors are free). It returns two abstracts
+// per hit: `snippet` (100–200 chars, meant for UI display) and `summary`
+// (600–800 chars, meant for model consumption) — we hand the LLM the
+// truncated summary, falling back to the snippet when a hit has none.
+func searchDeepSeek(ctx context.Context, query string, max int) ([]WebSearchResult, error) {
+	if q := []rune(query); len(q) > deepSeekQueryMaxRunes {
+		query = string(q[:deepSeekQueryMaxRunes])
+	}
+	body, _ := json.Marshal(map[string]any{
+		"query": query,
+		"count": max,
+	})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, deepseekEndpoint, bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("DEEPSEEK_API_KEY"))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := webHTTPClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("deepseek: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("deepseek: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var data struct {
+		Results []struct {
+			Title   string `json:"title"`
+			URL     string `json:"url"`
+			Snippet string `json:"snippet"`
+			Summary string `json:"summary"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("deepseek: decode: %w", err)
+	}
+	out := make([]WebSearchResult, 0, len(data.Results))
+	for _, r := range data.Results {
+		abstract := r.Summary
+		if abstract == "" {
+			abstract = r.Snippet
+		}
+		out = append(out, WebSearchResult{
+			Title:   r.Title,
+			URL:     r.URL,
+			Snippet: truncateRunes(abstract, deepSeekSummaryMaxRunes),
+		})
+	}
+	return out, nil
+}
 
 // searchBrave: https://api.search.brave.com/res/v1/web/search
 func searchBrave(ctx context.Context, query string, max int) ([]WebSearchResult, error) {
@@ -627,6 +700,15 @@ func decodeBingURL(wrapped string) string {
 }
 
 // ───────────────────── helpers ─────────────────────
+
+// truncateRunes caps s at n runes, marking the cut with an ellipsis.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
 
 var tagRE = regexp.MustCompile(`<[^>]+>`)
 

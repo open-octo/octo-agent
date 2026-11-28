@@ -19,6 +19,7 @@ func doctorHome(t *testing.T) string {
 	home := isolateHome(t)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("BRAVE_SEARCH_API_KEY", "")
 	t.Setenv("TAVILY_API_KEY", "")
 	t.Setenv("SERPER_API_KEY", "")

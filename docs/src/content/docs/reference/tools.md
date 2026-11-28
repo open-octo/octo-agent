@@ -66,11 +66,12 @@ API — the first one present wins:
 
 | Env var | Backend | Free allowance |
 |---|---|---|
+| `DEEPSEEK_API_KEY` | [DeepSeek](https://platform.deepseek.com/) | none — $0.75/1000 searches, empty results free |
 | `BRAVE_SEARCH_API_KEY` | [Brave Search](https://brave.com/search/api/) | 1000 searches/month |
 | `TAVILY_API_KEY` | [Tavily](https://www.tavily.com/) | 1000 searches/month |
 | `SERPER_API_KEY` | [Serper](https://serper.dev/) | 2500 one-off, then ~$1/1000 |
 
-Either free tier covers ordinary single-user use. `octo doctor` reports which backend is configured,
+Any of the free tiers covers ordinary single-user use. `octo doctor` reports which backend is configured,
 and each result card names the backend that actually answered — a card marked `scraped` means the
 cascade fell through to HTML scraping, either because no key is set or because the keyed backend
 errored, hit its quota, or returned nothing.

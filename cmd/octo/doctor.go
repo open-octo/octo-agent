@@ -143,6 +143,7 @@ func runDoctor(_ []string, _ io.Reader, stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintln(stdout, "  ! no search key set — falling back to DuckDuckGo/Bing HTML scraping (poor results)")
 		fmt.Fprintln(stdout, "    → set one of these for a real search index:")
+		fmt.Fprintln(stdout, "        DEEPSEEK_API_KEY       $0.75/1000 searches        https://platform.deepseek.com/")
 		fmt.Fprintln(stdout, "        BRAVE_SEARCH_API_KEY   1000 searches/month free   https://brave.com/search/api/")
 		fmt.Fprintln(stdout, "        TAVILY_API_KEY         1000 searches/month free   https://www.tavily.com/")
 		fmt.Fprintln(stdout, "        SERPER_API_KEY         2500 free, then $1/1000    https://serper.dev/")
