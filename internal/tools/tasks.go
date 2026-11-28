@@ -162,7 +162,9 @@ func (TaskUpdateTool) Definition() agent.ToolDefinition {
 			"(`pending` → `in_progress` when you start a step, `in_progress` → `completed` when " +
 			"you finish). Can also rewrite subject / description / active_form if the scope of " +
 			"the task changes. Set status to `deleted` to drop a task that was misclassified or " +
-			"no longer applies. Only the fields you provide are touched.",
+			"no longer applies. Only the fields you provide are touched — so every call must " +
+			"carry at least one of status / subject / description / active_form besides task_id " +
+			"(task_id alone is not an update).",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -225,7 +227,22 @@ func (TaskUpdateTool) Execute(ctx context.Context, _ string, input map[string]an
 	}
 
 	if u.Status == nil && u.Subject == nil && u.Description == nil && u.ActiveForm == nil {
-		return agent.ToolResult{Text: ""}, fmt.Errorf("task_update: nothing to update (provide status, subject, description, or active_form)")
+		// Name the keys that arrived, not just the ones that are missing: a
+		// model that sent only task_id otherwise reads the same complaint on
+		// every retry and repeats the identical call (seen as a 14-round-trip
+		// loop on the Kimi endpoint). Same reasoning as requiredPath.
+		received := "no arguments were received"
+		if len(input) > 0 {
+			keys := make([]string, 0, len(input))
+			for k := range input {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			received = "received keys: " + strings.Join(keys, ", ")
+		}
+		return agent.ToolResult{Text: ""}, fmt.Errorf(
+			`task_update: nothing to update — %s. A call must also carry one of status, subject, description, or active_form, e.g. {"task_id": %d, "status": "completed"}`,
+			received, id)
 	}
 
 	oldTask, _ := store.Get(id)
