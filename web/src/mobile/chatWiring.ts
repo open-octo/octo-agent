@@ -46,6 +46,10 @@ import {
   finishAllTools,
   finishToolsById,
   clearMsgs,
+  historyPrefixLen,
+  setHistoryPrefixLen,
+  getHistoryPos,
+  setHistoryPos,
   showToast,
   uid,
   hydrateAgentRuns,
@@ -90,7 +94,16 @@ function applyHistoryEvent(sid: string, ev: Record<string, any>, showReasoning: 
 // Fetch and render a session's persisted transcript. Resolves once settled, so
 // the caller can subscribe over WS only after history renders (same ordering the
 // desktop relies on to avoid replayed tool cards landing before their message).
-export function loadMobileHistory(sid: string): Promise<void> {
+//
+// resync marks the reconnect path (#2745): the request carries the cached
+// persisted-history cursor and the server answers with just the tail persisted
+// while the phone was disconnected (or a full response when the history epoch
+// moved — edit / rollback / compaction / clear elsewhere). Either way the
+// rendered history PREFIX stays on screen during the fetch; only the stale live
+// tail is dropped up front, since it is rebuildable (completed turns re-render
+// from the fetched history, a running turn from the subscribe replay) and
+// keeping it would duplicate against both.
+export function loadMobileHistory(sid: string, resync = false): Promise<void> {
   api.getSessionGoal(sid)
     .then(resp => chatGoal.update(m => ({ ...m, [sid]: resp?.goal ?? null })))
     .catch(() => {})
@@ -99,22 +112,39 @@ export function loadMobileHistory(sid: string): Promise<void> {
   api.getAgentRuns(sid)
     .then((resp: any) => hydrateAgentRuns(sid, resp))
     .catch(() => {})
-  return api.getSessionMessages(sid).then((resp: any) => {
+  chatMessages.update(m => {
+    const msgs = m[sid] ?? []
+    return { ...m, [sid]: msgs.slice(0, Math.min(historyPrefixLen(sid), msgs.length)) }
+  })
+  return api.getSessionMessages(sid, resync ? getHistoryPos(sid) ?? undefined : undefined).then((resp: any) => {
     const events: any[] = resp?.events ?? []
     const showReasoning = resp?.show_reasoning ?? true
+    // Cursor for the next reconnect resync; an older server omits both fields
+    // and the next resync simply asks for the full transcript again.
+    if (typeof resp?.history_len === 'number' && typeof resp?.epoch === 'number') {
+      setHistoryPos(sid, { after: resp.history_len, epoch: resp.epoch })
+    }
+    const incremental = resp?.incremental === true
     // After a rollback the rerun is already streaming while this fetch is in
     // flight; render history first, then put the live messages back behind
     // it (same as the desktop's loadHistory).
-    const live = get(chatMessages)[sid] ?? []
-    clearMsgs(sid)
-    // The replay below re-observes every artifact in transcript order.
-    resetArtifacts(sid)
+    const msgs = get(chatMessages)[sid] ?? []
+    const prefixLen = Math.min(historyPrefixLen(sid), msgs.length)
+    const live = msgs.slice(prefixLen)
+    if (incremental) {
+      chatMessages.update(m => ({ ...m, [sid]: (m[sid] ?? []).slice(0, prefixLen) }))
+    } else {
+      clearMsgs(sid)
+      // The replay below re-observes every artifact in transcript order.
+      resetArtifacts(sid)
+    }
     const historyToolIds = new Set<string>()
     for (const ev of events) {
       if (ev.type === 'tool_call' && ev.tool_id) historyToolIds.add(ev.tool_id)
       applyHistoryEvent(sid, ev, showReasoning)
     }
     finishToolsById(sid, historyToolIds)
+    setHistoryPrefixLen(sid, (get(chatMessages)[sid] ?? []).length)
     if (live.length) {
       chatMessages.update(m => ({ ...m, [sid]: appendLiveAfterHistory(m[sid] ?? [], live) }))
     }
@@ -482,17 +512,16 @@ export function wireMobileSession(sid: string): () => void {
   cleanups.push(ws.on('history_reload', (ev: any) => {
     if (!forSid(ev)) return
     mobileSteers.update(m => ({ ...m, [sid]: [] }))
-    clearMsgs(sid)
-    loadMobileHistory(sid)
+    loadMobileHistory(sid, true)
   }))
 
   // An edit or retry (from any client) stripped the transcript tail
   // server-side; without this the phone keeps the stale tail and the rerun
-  // lands after it.
+  // lands after it. Always a full fetch: a rollback moved the history epoch,
+  // so the incremental cursor is invalid by definition.
   cleanups.push(ws.on('history_rollback', (ev: any) => {
     if (!forSid(ev)) return
     mobileSteers.update(m => ({ ...m, [sid]: [] }))
-    clearMsgs(sid)
     loadMobileHistory(sid)
   }))
 

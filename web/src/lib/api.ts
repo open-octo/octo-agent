@@ -197,11 +197,19 @@ export async function editMessage(sessionId: string, messageIndex: number, newCo
   })
 }
 
-// The server returns a session's full persisted transcript in one shot — it
-// has no limit/before pagination (GET /api/sessions/:id/messages ignores
-// those params entirely and always returns everything), so there is nothing
-// to page through here.
-export async function getSessionMessages(id: string): Promise<unknown> {
+// The server returns a session's persisted transcript as an event stream.
+// Without a position it returns everything — there is still no limit/before
+// pagination. With a position ({after, epoch} — see stores.getHistoryPos) the
+// reconnect resync asks only for what changed while the tab was disconnected:
+// the server serves just the persisted tail after `after` and marks the
+// response `incremental`, unless the history epoch moved under us (edit /
+// rollback / compaction / clear on another client while we were down), which
+// falls back to a full response.
+export async function getSessionMessages(id: string, pos?: { after: number; epoch: number }): Promise<unknown> {
+  if (pos) {
+    return request<unknown>(
+      `/api/sessions/${id}/messages?after=${pos.after}&epoch=${pos.epoch}`)
+  }
   return request<unknown>(`/api/sessions/${id}/messages`)
 }
 
