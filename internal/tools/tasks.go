@@ -200,8 +200,13 @@ func (TaskUpdateTool) Execute(ctx context.Context, _ string, input map[string]an
 	if store == nil {
 		return agent.ToolResult{Text: ""}, fmt.Errorf("task_update: task tracking is not configured for this session")
 	}
-	id := intArg(input, "task_id", 0)
-	if id <= 0 {
+	id, idOK := argInt(input, "task_id")
+	if !idOK || id <= 0 {
+		// A stringified ID ("1") must not be reported as a missing one — the
+		// model would send the same call again. Name the value it gave.
+		if raw, present := input["task_id"]; present && !idOK {
+			return agent.ToolResult{Text: ""}, fmt.Errorf("task_update: task_id must be an integer, got %#v — send the number unquoted, e.g. \"task_id\": 1", raw)
+		}
 		return agent.ToolResult{Text: ""}, fmt.Errorf("task_update: task_id is required (positive integer)")
 	}
 
