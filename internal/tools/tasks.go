@@ -228,21 +228,13 @@ func (TaskUpdateTool) Execute(ctx context.Context, _ string, input map[string]an
 
 	if u.Status == nil && u.Subject == nil && u.Description == nil && u.ActiveForm == nil {
 		// Name the keys that arrived, not just the ones that are missing: a
-		// model that sent only task_id otherwise reads the same complaint on
-		// every retry and repeats the identical call (seen as a 14-round-trip
-		// loop on the Kimi endpoint). Same reasoning as requiredPath.
-		received := "no arguments were received"
-		if len(input) > 0 {
-			keys := make([]string, 0, len(input))
-			for k := range input {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			received = "received keys: " + strings.Join(keys, ", ")
-		}
+		// model that sent only task_id (or mistyped status as "stats") otherwise
+		// reads the same complaint on every retry and repeats the identical call
+		// — observed as a 14-round-trip loop on the Kimi endpoint. input is
+		// never empty here: task_id had to be present for id to be positive.
 		return agent.ToolResult{Text: ""}, fmt.Errorf(
-			`task_update: nothing to update — %s. A call must also carry one of status, subject, description, or active_form, e.g. {"task_id": %d, "status": "completed"}`,
-			received, id)
+			`task_update: nothing to update — received keys: %s. A call must also carry one of status, subject, description, or active_form, e.g. {"task_id": %d, "status": "completed"}`,
+			receivedKeys(input), id)
 	}
 
 	oldTask, _ := store.Get(id)

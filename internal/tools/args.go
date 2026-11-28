@@ -6,6 +6,19 @@ import (
 	"strings"
 )
 
+// receivedKeys renders the argument names a model actually sent, sorted so the
+// message is deterministic. Required-argument errors quote it so a model that
+// used the wrong key name (or dropped a field) can correct the next call
+// instead of reading the same complaint again.
+func receivedKeys(input map[string]any) string {
+	keys := make([]string, 0, len(input))
+	for k := range input {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
+}
+
 // requiredPath reads the file-path argument of a file tool, and when it is
 // missing says what WAS received. A model that sends `file_path` (another
 // agent's convention) or drops the key otherwise sees only "path is required"
@@ -20,12 +33,7 @@ func requiredPath(tool string, input map[string]any) (string, error) {
 	if len(input) == 0 {
 		return "", fmt.Errorf("%s: path is required (no arguments were received)", tool)
 	}
-	keys := make([]string, 0, len(input))
-	for k := range input {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return "", fmt.Errorf(`%s: path is required — the file parameter is named "path"; received keys: %s`, tool, strings.Join(keys, ", "))
+	return "", fmt.Errorf(`%s: path is required — the file parameter is named "path"; received keys: %s`, tool, receivedKeys(input))
 }
 
 // stringArg reads a string argument from a tool-call input map, defaulting to

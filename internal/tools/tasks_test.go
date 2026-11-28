@@ -152,6 +152,27 @@ func TestTaskUpdateTool_Execute_RejectsNoFields(t *testing.T) {
 	}
 }
 
+// A mistyped field name is the case the key list earns its keep: the message
+// has to show that "stats" arrived instead of "status", so the model can fix
+// the spelling rather than resend the same call.
+func TestTaskUpdateTool_Execute_ReportsMistypedKey(t *testing.T) {
+	store := useTaskStore(t)
+	id, _ := store.Create("task", "", "")
+	_, err := (TaskUpdateTool{}).Execute(context.Background(), "task_update", map[string]any{
+		"task_id": float64(id),
+		"stats":   "completed",
+	})
+	if err == nil {
+		t.Fatal("expected an error for a call with no recognised field")
+	}
+	if !strings.Contains(err.Error(), "received keys: stats, task_id") {
+		t.Errorf("error should list the keys that arrived, got %q", err.Error())
+	}
+	if got, _ := store.Get(id); got.Status != tasks.Pending {
+		t.Errorf("Status = %q, want the task left untouched", got.Status)
+	}
+}
+
 func TestTaskUpdateTool_Execute_InvalidStatus(t *testing.T) {
 	store := useTaskStore(t)
 	id, _ := store.Create("task", "", "")
