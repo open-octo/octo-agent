@@ -60,6 +60,13 @@ first; there's no cap on how many background processes can run at once, and all 
 | `web_search` | search the web |
 | `browser` | drive a real Chrome tab over CDP — see [Browser automation](/docs/guides/browser-automation/) |
 
+With `DEEPSEEK_API_KEY` set, a `web_fetch` whose direct GET fails with an HTTP error — anti-bot
+403 walls, hotlink 404s, 5xx — is retried through [DeepSeek's Fetch API](https://api-docs.deepseek.com/guides/search/),
+which returns the page as Markdown ($0.75/1000 fetches; failed and empty pages are free). The retry
+is skipped when `clean=false` (the API returns Markdown only, so it cannot answer a request for raw
+markup) and for loopback, private-LAN and link-local URLs, which are never handed to a third party.
+The result says so in its first line when the retry is what answered.
+
 `web_search` works with no configuration by scraping DuckDuckGo and Bing HTML, but those results are
 markedly worse than a real search index. Setting any one of these env vars switches it to a proper
 API — the first one present wins:
