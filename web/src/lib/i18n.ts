@@ -261,7 +261,7 @@ export const en: Record<string, string> = {
   "tools.undo_overwrite": "Undo — restore the previous version",
   "tools.undo_done": "Restored",
   "tools.search_scraped": "Scraped results — a search API key returns better ones.",
-  "tools.search_get_key": "Free tiers available",
+  "tools.search_get_key": "Compare search APIs",
   // MCP view (McpView.svelte)
   "mcp.toast_removed": "Server removed",
   "mcp.confirm_delete": "Delete MCP server \"{name}\"?",
@@ -1304,7 +1304,7 @@ export const zh: Record<string, string> = {
   "tools.undo_overwrite": "撤销 — 还原覆盖前的版本",
   "tools.undo_done": "已还原",
   "tools.search_scraped": "抓取结果 — 配一把搜索 API key 质量会好很多。",
-  "tools.search_get_key": "有免费额度",
+  "tools.search_get_key": "对比搜索 API",
   // MCP 视图 (McpView.svelte)
   "mcp.toast_removed": "服务器已移除",
   "mcp.confirm_delete": "确认删除 MCP 服务器 \"{name}\"？",

@@ -711,7 +711,7 @@
               <div class="search-hint">
                 <iconify-icon icon="lucide:info" width="12"></iconify-icon>
                 {$t('tools.search_scraped')}
-                <a href="https://brave.com/search/api/" target="_blank" rel="noopener noreferrer">{$t('tools.search_get_key')}</a>
+                <a href="https://octo-agent.dev/docs/reference/tools/" target="_blank" rel="noopener noreferrer">{$t('tools.search_get_key')}</a>
               </div>
             {/if}
           </div>
