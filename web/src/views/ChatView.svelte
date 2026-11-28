@@ -1711,6 +1711,11 @@ import QuestionModal from '../components/overlays/QuestionModal.svelte'
     const sc = messagesEl
     if (!sc) return
     stick = true
+    // Cancel a rail jump's in-flight settle first: settleScroll yields to
+    // wheel/pointerdown on the SCROLLER, but this button sits outside the
+    // scroller, so clicking it right after a rail jump would otherwise leave
+    // the settle nudging the pane back up toward the old target message.
+    cancelJumpSettle?.()
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     sc.scrollTo({ top: sc.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
     showJumpBottom = false
